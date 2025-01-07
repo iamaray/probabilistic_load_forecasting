@@ -142,14 +142,15 @@ class DecoderLayer(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, N, d_model, ahead):
+    def __init__(self, N, d_model, num_targets, num_aux_feats, window_length, ahead):
         super(Decoder, self).__init__()
+        feats = num_targets + num_aux_feats
         layer = DecoderLayer(d_model=d_model, dropout=0.1)
         self.layers = clones(layer, N)
         self.norm = LayerNorm(layer.size)
-        self.outputLinear = BayesianLinear(d_model, 16)
-        self.outputLinear1 = BayesianLinear(72*16, 72)
-        self.outputLinear2 = BayesianLinear(72, ahead)
+        self.outputLinear = BayesianLinear(d_model, feats)
+        self.outputLinear1 = BayesianLinear(window_length*feats, window_length)
+        self.outputLinear2 = BayesianLinear(window_length, ahead)
 
     def forward(self, memory, decoderINPUT):
         for layer in self.layers:
@@ -164,65 +165,67 @@ class BayesianMDeT(nn.Module):
     BayesianDeT
     """
 
-    def __init__(self, ahead):
+    def __init__(self, ahead, num_targets, num_aux_feats, window_len):
         super(BayesianMDeT, self).__init__()
-        d_model = 32
-        self.encoder = Encoder(2, d_model=d_model)
-        self.decoder1 = Decoder(2, d_model=d_model, ahead=ahead)
-        self.decoder2 = Decoder(2, d_model=d_model, ahead=ahead)
-        self.decoder3 = Decoder(2, d_model=d_model, ahead=ahead)
 
-        self.encoderLinear = BayesianLinear(16, d_model)
-        self.decoder1_Linear = BayesianLinear(14, d_model)
-        self.decoder2_Linear = BayesianLinear(14, d_model)
-        self.decoder3_Linear = BayesianLinear(14, d_model)
+        self.num_targets = num_targets
+        self.num_aux_feats = num_aux_feats
+        self.window_len = window_len
+        d_model = 32
+        num_feats = num_targets + num_aux_feats
+        self.encoder = Encoder(N=2, d_model=d_model)
+
+        self.decoders = nn.ModuleList()
+        for _ in range(num_targets):
+            self.decoders.append(Decoder(2, d_model=d_model, ahead=ahead, num_targets=num_targets,
+                                       num_aux_feats=num_aux_feats, window_length=window_len))
+
+        self.encoderLinear = BayesianLinear(num_feats, d_model)
+        self.decoder_linear_layers = nn.ModuleList()
+        for _ in range(num_targets):
+            self.decoder_linear_layers.append(
+                BayesianLinear(1 + num_aux_feats, d_model))
 
     def forward(self, x):
-        # x: input data. shape (batch, 72, 16)
+        # x: input data. shape (batch, window_len, num_targets + num_aux_feats)
         encoder_output = self.encoder(self.encoderLinear(x))
-        # aux: Auxiliary information. shape (batch, 72, 13)
-        aux = x[:, :, 3:]
-        # inputi: load data + Auxiliary information. shape (batch, 72, 14)
-        input1 = torch.cat([x[:, :, : 1], aux], dim=2)
-        input2 = torch.cat([x[:, :, 1: 2], aux], dim=2)
-        input3 = torch.cat([x[:, :, 2: 3], aux], dim=2)
+        # aux: Auxiliary information. shape (batch, window_len, num_aux_feats)
+        aux = x[:, :, self.num_targets:]
+        # inputs: list of tensors combining each target with auxiliary features
+        inputs = [
+            torch.cat([x[:, :, i:i+1], aux], dim=2)
+            for i in range(self.num_targets)
+        ]
 
-        decoder1_output = self.decoder1(
-            encoder_output, self.decoder1_Linear(input1))
-        decoder2_output = self.decoder2(
-            encoder_output, self.decoder2_Linear(input2))
-        decoder3_output = self.decoder3(
-            encoder_output, self.decoder3_Linear(input3))
-
-        return decoder1_output, decoder2_output, decoder3_output
-#################
-
+        outputs = [self.decoders[i](encoder_output, self.decoder_linear_layers[i](
+            inputs[i])) for i in range(self.num_targets)]
+        return tuple(outputs)
 
 ###########################################
 
 
 class MyModel(nn.Module):
-    def __init__(self,
-                 cuda=True):
+    def __init__(self, ahead=1, num_targets=3, num_aux_feats=13, window_len=72, cuda=True):
         super(MyModel, self).__init__()
-        self.create()
+        self.num_targets = num_targets
+        self.create(ahead, num_targets, num_aux_feats, window_len)
         self.cuda = cuda
     ###########################
 
-    def create(self):
-        # self.model = torch.compile(BayesianMDeT(ahead = 1))
-        self.model = BayesianMDeT(ahead=1)
-
-        self.BayesianWeightLinear = taskbalance()
+    def create(self, ahead, num_targets, num_aux_feats, window_len):
+        self.model = BayesianMDeT(ahead=ahead, num_targets=num_targets,
+                                 num_aux_feats=num_aux_feats, window_len=window_len)
+        self.BayesianWeightLinear = taskbalance(num=num_targets)
 
         if self.cuda:
             self.model.cuda()
+            self.BayesianWeightLinear.cuda()
+            
         print('    Total params: %.2fM' %
               (self.get_nb_parameters() / 1000000.0))
-        # self.optimizer = torch.optim.SGD(self.model.parameters(), lr=0.01, momentum=0)
-        # self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0)
         self.optimizer = torch.optim.Adam([{'params': self.model.parameters()},
-                                           {'params': self.BayesianWeightLinear.parameters()}], lr=0.001, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0)
+                                         {'params': self.BayesianWeightLinear.parameters()}], 
+                                        lr=0.001, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0)
 
         self.device = torch.device(
             "cuda:0" if torch.cuda.is_available() else "cpu")
@@ -230,52 +233,36 @@ class MyModel(nn.Module):
 
     def fit(self, x, y, samples=1):
         self.optimizer.zero_grad()
-        ave_loss1, ave_loss2, ave_loss3, kl = self.model.sample_elbo_m(inputs=x,
-                                                                       labels=y,
-                                                                       sample_nbr=samples)
+        ave_losses, kl = self.model.sample_elbo_m(inputs=x,
+                                                 labels=y,
+                                                 num_targets=self.num_targets,
+                                                 sample_nbr=samples)
 
-        overall_loss = self.BayesianWeightLinear(
-            ave_loss1, ave_loss2, ave_loss3)
-
+        overall_loss = self.BayesianWeightLinear(ave_losses)
         overall_loss = overall_loss + kl
 
         p_mu = self.BayesianWeightLinear.weight_mu
-
         p_rho = self.BayesianWeightLinear.weight_rho
 
         overall_loss.backward()
         self.optimizer.step()
 
-        return overall_loss, ave_loss1, ave_loss2, ave_loss3, p_mu, p_rho
-    ###########################
+        return overall_loss, ave_losses, p_mu, p_rho
     ###########################
 
-    def Mytest(self,
-               x_test,
-               samples=10,
-               ahead=1):
-
+    def Mytest(self, x_test, samples=10, ahead=1):
         batch_size = x_test.shape[0]
+        outputs = [np.zeros((0, batch_size, ahead)) for _ in range(self.num_targets)]
 
-        output1_a = np.zeros((0, batch_size, ahead))
-        output2_a = np.zeros((0, batch_size, ahead))
-        output3_a = np.zeros((0, batch_size, ahead))
+        for _ in range(samples):
+            model_outputs = self.model(x_test)
+            
+            for i, output in enumerate(model_outputs):
+                output_np = np.reshape(output.cpu().detach().numpy(),
+                                     (-1, output.shape[0], output.shape[1]))
+                outputs[i] = np.concatenate([outputs[i], output_np], axis=0)
 
-        for i in range(samples):
-            output1, output2, output3 = self.model(x_test)
-
-            output1 = np.reshape(output1.cpu().detach().numpy(
-            ), ((-1, output1.shape[0], output1.shape[1])))
-            output2 = np.reshape(output2.cpu().detach().numpy(
-            ), ((-1, output2.shape[0], output2.shape[1])))
-            output3 = np.reshape(output3.cpu().detach().numpy(
-            ), ((-1, output3.shape[0], output3.shape[1])))
-
-            output1_a = np.concatenate([output1_a, output1], axis=0)
-            output2_a = np.concatenate([output2_a, output2], axis=0)
-            output3_a = np.concatenate([output3_a, output3], axis=0)
-
-        return output1_a, output2_a, output3_a
+        return tuple(outputs)
     ###########################
 
     def get_nb_parameters(self):
