@@ -9,7 +9,7 @@ from torch.utils.tensorboard import SummaryWriter
 from .utils import loadDataforTrainVal
 
 
-class Trainer:
+class BayesTrainer:
     def __init__(self, input_size=24*3, output_size=1, batch_size=64, epochs=100,
                  num_targets=3, num_aux_feats=13, window_len=72, ahead=1):
         # GPU setup
