@@ -8,7 +8,7 @@ from .utils import taskbalance
 from .utils import rmse_loss
 from .layers import BayesianLinear
 from .utils import variational_estimator
-
+from utils import model_saver
 ################################################################################################################
 
 
@@ -90,15 +90,18 @@ class PositionwiseFeedForward(nn.Module):
 
 
 class EncoderLayer(nn.Module):
-    def __init__(self, d_model, dropout):
+    def __init__(self, d_model, dropout, d_ff=128, N=2, h=8):
         super(EncoderLayer, self).__init__()
         self.size = d_model
+        self.d_ff = d_ff
+        self.N = N
+        self.h = h
         self.self_attn = MultiHeadedAttention(
-            h=8, d_model=d_model, dropout=dropout)
+            h=h, d_model=d_model, dropout=dropout)
         self.feed_forward = PositionwiseFeedForward(
-            d_model=d_model, d_ff=128, dropout=dropout)
+            d_model=d_model, d_ff=d_ff, dropout=dropout)
         self.sublayer = clones(SublayerConnection(
-            size=d_model, dropout=dropout), 2)
+            size=d_model, dropout=dropout), N=N)
 
     def forward(self, x):
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x))
@@ -107,9 +110,9 @@ class EncoderLayer(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, N, d_model):
+    def __init__(self, num_layers, d_model, dropout=0.1, d_ff=128, N=2, h=8):
         super(Encoder, self).__init__()
-        layer = EncoderLayer(d_model=d_model, dropout=0.1)
+        layer = EncoderLayer(d_model=d_model, dropout=dropout)
         self.layers = clones(layer, N)
         self.norm = LayerNorm(layer.size)
 
@@ -121,17 +124,17 @@ class Encoder(nn.Module):
 
 
 class DecoderLayer(nn.Module):
-    def __init__(self, d_model, dropout):
+    def __init__(self, d_model, dropout, h=8, d_ff=128, N=3):
         super(DecoderLayer, self).__init__()
         self.size = d_model
         self.self_attn = MultiHeadedAttention(
-            h=8, d_model=d_model, dropout=dropout)
+            h=h, d_model=d_model, dropout=dropout)
         self.src_attn = MultiHeadedAttention(
-            h=8, d_model=d_model, dropout=dropout)
+            h=h, d_model=d_model, dropout=dropout)
         self.feed_forward = PositionwiseFeedForward(
-            d_model=d_model, d_ff=128, dropout=dropout)
+            d_model=d_model, d_ff=d_ff, dropout=dropout)
         self.sublayer = clones(SublayerConnection(
-            size=d_model, dropout=dropout), 3)
+            size=d_model, dropout=dropout), N=N)
 
     def forward(self, memory, x):
         m = memory
@@ -142,11 +145,12 @@ class DecoderLayer(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, N, d_model, num_targets, num_aux_feats, window_length, ahead):
+    def __init__(self, num_layers, d_model, num_targets, num_aux_feats, window_length, ahead, dropout, h, N):
         super(Decoder, self).__init__()
         feats = num_targets + num_aux_feats
-        layer = DecoderLayer(d_model=d_model, dropout=0.1)
-        self.layers = clones(layer, N)
+        layer = DecoderLayer(
+            d_model=d_model, dropout=dropout, h=h, d_ff=d_ff, N=N)
+        self.layers = clones(layer, num_layers)
         self.norm = LayerNorm(layer.size)
         self.outputLinear = BayesianLinear(d_model, feats)
         self.outputLinear1 = BayesianLinear(window_length*feats, window_length)
@@ -160,25 +164,45 @@ class Decoder(nn.Module):
 
 
 @variational_estimator
+@model_saver
 class BayesianMDeT(nn.Module):
     """
     BayesianDeT
     """
 
-    def __init__(self, ahead, num_targets, num_aux_feats, window_len):
-        super(BayesianMDeT, self).__init__()
+    def __init__(
+            self,
+            ahead,
+            num_targets,
+            num_aux_feats,
+            window_len,
+            name="BSMDeT",
+            d_model=32,
+            encoder_layers=2,
+            encoder_d_ff=128,
+            encoder_sublayers=2,
+            encoder_h=8,
+            encoder_dropout=0.1,
+            decoder_layers=2,
+            decoder_dropout=0.1,
+            decoder_h=8,
+            decoder_d_ff=128,
+            decoder_sublayers=3):
 
+        super(BayesianMDeT, self).__init__()
+        self.name = name
         self.num_targets = num_targets
         self.num_aux_feats = num_aux_feats
         self.window_len = window_len
-        d_model = 32
+        self.d_model = d_model
         num_feats = num_targets + num_aux_feats
-        self.encoder = Encoder(N=2, d_model=d_model)
+        self.encoder = Encoder(num_layers=encoder_layers, d_model=d_model,
+                               dropout=encoder_dropout, d_ff=encoder_d_ff, N=encoder_sublayers, h=encoder_h)
 
         self.decoders = nn.ModuleList()
         for _ in range(num_targets):
-            self.decoders.append(Decoder(2, d_model=d_model, ahead=ahead, num_targets=num_targets,
-                                       num_aux_feats=num_aux_feats, window_length=window_len))
+            self.decoders.append(Decoder(num_layers=decoder_layers, d_model=d_model, ahead=ahead, num_targets=num_targets,
+                                         num_aux_feats=num_aux_feats, window_length=window_len, dropout=decoder_dropout, h=decoder_h, N=decoder_sublayers))
 
         self.encoderLinear = BayesianLinear(num_feats, d_model)
         self.decoder_linear_layers = nn.ModuleList()
@@ -204,28 +228,77 @@ class BayesianMDeT(nn.Module):
 ###########################################
 
 
-class MyModel(nn.Module):
-    def __init__(self, ahead=1, num_targets=3, num_aux_feats=13, window_len=72, cuda=True):
+class BSMDeTWrapper(nn.Module):
+    def __init__(self,
+                 ahead=1,
+                 num_targets=3,
+                 num_aux_feats=13,
+                 window_len=72,
+                 cuda=True,
+                 name="BSMDeT",
+                 d_model=32,
+                 encoder_layers=2,
+                 encoder_d_ff=128,
+                 encoder_sublayers=2,
+                 encoder_h=8,
+                 encoder_dropout=0.1,
+                 decoder_layers=2,
+                 decoder_dropout=0.1,
+                 decoder_h=8,
+                 decoder_d_ff=128,
+                 decoder_sublayers=3):
         super(MyModel, self).__init__()
         self.num_targets = num_targets
         self.create(ahead, num_targets, num_aux_feats, window_len)
         self.cuda = cuda
     ###########################
 
-    def create(self, ahead, num_targets, num_aux_feats, window_len):
-        self.model = BayesianMDeT(ahead=ahead, num_targets=num_targets,
-                                 num_aux_feats=num_aux_feats, window_len=window_len)
+    def create(self,
+               ahead,
+               num_targets,
+               num_aux_feats,
+               window_len,
+               name="BSMDeT",
+               d_model=32,
+               encoder_layers=2,
+               encoder_d_ff=128,
+               encoder_sublayers=2,
+               encoder_h=8,
+               encoder_dropout=0.1,
+               decoder_layers=2,
+               decoder_dropout=0.1,
+               decoder_h=8,
+               decoder_d_ff=128,
+               decoder_sublayers=3):
+        self.model = BayesianMDeT(
+            ahead=ahead,
+            num_targets=num_targets,
+            num_aux_feats=num_aux_feats,
+            window_len=window_len,
+            name=name,
+            d_model=d_model,
+            encoder_layers=encoder_layers,
+            encoder_d_ff=encoder_d_ff,
+            encoder_sublayers=encoder_sublayers,
+            encoder_h=encoder_h,
+            encoder_dropout=encoder_dropout,
+            decoder_layers=decoder_layers,
+            decoder_dropout=decoder_dropout,
+            decoder_h=decoder_h,
+            decoder_d_ff=decoder_d_ff,
+            decoder_sublayers=decoder_sublayers)
+
         self.BayesianWeightLinear = taskbalance(num=num_targets)
 
         if self.cuda:
             self.model.cuda()
             self.BayesianWeightLinear.cuda()
-            
+
         print('    Total params: %.2fM' %
               (self.get_nb_parameters() / 1000000.0))
         self.optimizer = torch.optim.Adam([{'params': self.model.parameters()},
-                                         {'params': self.BayesianWeightLinear.parameters()}], 
-                                        lr=0.001, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0)
+                                           {'params': self.BayesianWeightLinear.parameters()}],
+                                          lr=0.001, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0)
 
         self.device = torch.device(
             "cuda:0" if torch.cuda.is_available() else "cpu")
@@ -234,9 +307,9 @@ class MyModel(nn.Module):
     def fit(self, x, y, samples=1):
         self.optimizer.zero_grad()
         ave_losses, kl = self.model.sample_elbo_m(inputs=x,
-                                                 labels=y,
-                                                 num_targets=self.num_targets,
-                                                 sample_nbr=samples)
+                                                  labels=y,
+                                                  num_targets=self.num_targets,
+                                                  sample_nbr=samples)
 
         overall_loss = self.BayesianWeightLinear(ave_losses)
         overall_loss = overall_loss + kl
@@ -252,14 +325,15 @@ class MyModel(nn.Module):
 
     def Mytest(self, x_test, samples=10, ahead=1):
         batch_size = x_test.shape[0]
-        outputs = [np.zeros((0, batch_size, ahead)) for _ in range(self.num_targets)]
+        outputs = [np.zeros((0, batch_size, ahead))
+                   for _ in range(self.num_targets)]
 
         for _ in range(samples):
             model_outputs = self.model(x_test)
-            
+
             for i, output in enumerate(model_outputs):
                 output_np = np.reshape(output.cpu().detach().numpy(),
-                                     (-1, output.shape[0], output.shape[1]))
+                                       (-1, output.shape[0], output.shape[1]))
                 outputs[i] = np.concatenate([outputs[i], output_np], axis=0)
 
         return tuple(outputs)
