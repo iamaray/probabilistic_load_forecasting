@@ -145,7 +145,7 @@ class DecoderLayer(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, num_layers, d_model, num_targets, num_aux_feats, window_length, ahead, dropout, h, N):
+    def __init__(self, num_layers, d_model, num_targets, num_aux_feats, window_length, ahead, dropout, h, N, d_ff):
         super(Decoder, self).__init__()
         feats = num_targets + num_aux_feats
         layer = DecoderLayer(
@@ -164,7 +164,6 @@ class Decoder(nn.Module):
 
 
 @variational_estimator
-@model_saver
 class BayesianMDeT(nn.Module):
     """
     BayesianDeT
@@ -202,7 +201,7 @@ class BayesianMDeT(nn.Module):
         self.decoders = nn.ModuleList()
         for _ in range(num_targets):
             self.decoders.append(Decoder(num_layers=decoder_layers, d_model=d_model, ahead=ahead, num_targets=num_targets,
-                                         num_aux_feats=num_aux_feats, window_length=window_len, dropout=decoder_dropout, h=decoder_h, N=decoder_sublayers))
+                                         num_aux_feats=num_aux_feats, window_length=window_len, dropout=decoder_dropout, h=decoder_h, N=decoder_sublayers, d_ff=decoder_d_ff))
 
         self.encoderLinear = BayesianLinear(num_feats, d_model)
         self.decoder_linear_layers = nn.ModuleList()
@@ -210,12 +209,15 @@ class BayesianMDeT(nn.Module):
             self.decoder_linear_layers.append(
                 BayesianLinear(1 + num_aux_feats, d_model))
 
-    def forward(self, x):
+    def forward(self, input: torch.Tensor):
+        # x = input.transpose(1, 2)
+        x = input
+        # print(x.shape)
         # x: input data. shape (batch, window_len, num_targets + num_aux_feats)
         encoder_output = self.encoder(self.encoderLinear(x))
         # aux: Auxiliary information. shape (batch, window_len, num_aux_feats)
         aux = x[:, :, self.num_targets:]
-        # inputs: list of tensors combining each target with auxiliary features
+
         inputs = [
             torch.cat([x[:, :, i:i+1], aux], dim=2)
             for i in range(self.num_targets)
@@ -223,18 +225,22 @@ class BayesianMDeT(nn.Module):
 
         outputs = [self.decoders[i](encoder_output, self.decoder_linear_layers[i](
             inputs[i])) for i in range(self.num_targets)]
-        return tuple(outputs)
+        outputs = torch.cat(outputs, dim=-1)
+
+        if len(outputs.shape) == 2:
+            outputs = outputs.unsqueeze(-1)
+        return outputs
 
 ###########################################
 
 
 class BSMDeTWrapper(nn.Module):
     def __init__(self,
-                 ahead=1,
-                 num_targets=3,
-                 num_aux_feats=13,
-                 window_len=72,
-                 cuda=True,
+                 ahead=24,
+                 num_targets=1,
+                 num_aux_feats=0,
+                 window_len=168,
+                 cuda=False,
                  name="BSMDeT",
                  d_model=32,
                  encoder_layers=2,
@@ -246,49 +252,51 @@ class BSMDeTWrapper(nn.Module):
                  decoder_dropout=0.1,
                  decoder_h=8,
                  decoder_d_ff=128,
-                 decoder_sublayers=3):
-        super(MyModel, self).__init__()
+                 decoder_sublayers=3,
+                 lr=0.001):
+        super(BSMDeTWrapper, self).__init__()
         self.num_targets = num_targets
-        self.create(ahead, num_targets, num_aux_feats, window_len)
+        self.ahead = ahead
+        self.num_aux_feats = num_aux_feats
+        self.window_len = window_len
+        self.cuda = cuda
+        self.name = name
+        self.d_model = d_model
+        self.encoder_layers = encoder_layers
+        self.encoder_d_ff = encoder_d_ff
+        self.encoder_sublayers = encoder_sublayers
+        self.encoder_h = encoder_h
+        self.encoder_dropout = encoder_dropout
+        self.decoder_layers = decoder_layers
+        self.decoder_dropout = decoder_dropout
+        self.decoder_h = decoder_h
+        self.decoder_d_ff = decoder_d_ff
+        self.decoder_sublayers = decoder_sublayers
+
+        self.create(lr=lr)
         self.cuda = cuda
     ###########################
 
-    def create(self,
-               ahead,
-               num_targets,
-               num_aux_feats,
-               window_len,
-               name="BSMDeT",
-               d_model=32,
-               encoder_layers=2,
-               encoder_d_ff=128,
-               encoder_sublayers=2,
-               encoder_h=8,
-               encoder_dropout=0.1,
-               decoder_layers=2,
-               decoder_dropout=0.1,
-               decoder_h=8,
-               decoder_d_ff=128,
-               decoder_sublayers=3):
+    def create(self, lr=0.001):
         self.model = BayesianMDeT(
-            ahead=ahead,
-            num_targets=num_targets,
-            num_aux_feats=num_aux_feats,
-            window_len=window_len,
-            name=name,
-            d_model=d_model,
-            encoder_layers=encoder_layers,
-            encoder_d_ff=encoder_d_ff,
-            encoder_sublayers=encoder_sublayers,
-            encoder_h=encoder_h,
-            encoder_dropout=encoder_dropout,
-            decoder_layers=decoder_layers,
-            decoder_dropout=decoder_dropout,
-            decoder_h=decoder_h,
-            decoder_d_ff=decoder_d_ff,
-            decoder_sublayers=decoder_sublayers)
+            ahead=self.ahead,
+            num_targets=self.num_targets,
+            num_aux_feats=self.num_aux_feats,
+            window_len=self.window_len,
+            name=self.name,
+            d_model=self.d_model,
+            encoder_layers=self.encoder_layers,
+            encoder_d_ff=self.encoder_d_ff,
+            encoder_sublayers=self.encoder_sublayers,
+            encoder_h=self.encoder_h,
+            encoder_dropout=self.encoder_dropout,
+            decoder_layers=self.decoder_layers,
+            decoder_dropout=self.decoder_dropout,
+            decoder_h=self.decoder_h,
+            decoder_d_ff=self.decoder_d_ff,
+            decoder_sublayers=self.decoder_sublayers)
 
-        self.BayesianWeightLinear = taskbalance(num=num_targets)
+        self.BayesianWeightLinear = taskbalance(num=self.num_targets)
 
         if self.cuda:
             self.model.cuda()
@@ -298,14 +306,17 @@ class BSMDeTWrapper(nn.Module):
               (self.get_nb_parameters() / 1000000.0))
         self.optimizer = torch.optim.Adam([{'params': self.model.parameters()},
                                            {'params': self.BayesianWeightLinear.parameters()}],
-                                          lr=0.001, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0)
+                                          lr=lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0)
 
         self.device = torch.device(
             "cuda:0" if torch.cuda.is_available() else "cpu")
     ###########################
 
-    def fit(self, x, y, samples=1):
+    def fit(self, in_x, in_y, samples=1):
+        x, y = in_x.transpose(1, 2), in_y.transpose(1, 2)
+        # x, y = in_x, in_y
         self.optimizer.zero_grad()
+        # print(x.shape, y.shape)
         ave_losses, kl = self.model.sample_elbo_m(inputs=x,
                                                   labels=y,
                                                   num_targets=self.num_targets,
@@ -323,20 +334,27 @@ class BSMDeTWrapper(nn.Module):
         return overall_loss, ave_losses, p_mu, p_rho
     ###########################
 
-    def Mytest(self, x_test, samples=10, ahead=1):
+    def test(self, in_test, samples=10):
+        x_test = in_test.transpose(1, 2)
         batch_size = x_test.shape[0]
-        outputs = [np.zeros((0, batch_size, ahead))
-                   for _ in range(self.num_targets)]
+        # outputs = [np.zeros((0, batch_size, self.ahead))
+        #            for _ in range(self.num_targets)]
 
-        for _ in range(samples):
-            model_outputs = self.model(x_test)
+        # for _ in range(samples):
+        #     model_outputs = self.model(x_test)
 
-            for i, output in enumerate(model_outputs):
-                output_np = np.reshape(output.cpu().detach().numpy(),
-                                       (-1, output.shape[0], output.shape[1]))
-                outputs[i] = np.concatenate([outputs[i], output_np], axis=0)
+        # for i, output in enumerate(model_outputs):
+        #     # output_np = torch.permute(output.cpu().detach(),
+        #     #                           (-1, output.shape[0], output.shape[1]))
+        #     # outputs[i] = torch.cat(
+        #     #     [outputs[i], output_np], axis=0).unsqueeze(-1)
+        #     outputs[i] = torch.cat(
+        #         [outputs[i]], axis=0).unsqueeze(-1)
 
-        return tuple(outputs)
+        return torch.stack(
+            [self.model(x_test).cpu().detach()
+             for _ in range(samples)],
+            dim=-1)
     ###########################
 
     def get_nb_parameters(self):
