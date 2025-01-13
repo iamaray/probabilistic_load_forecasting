@@ -9,6 +9,8 @@ from .utils import rmse_loss
 from .layers import BayesianLinear
 from .utils import variational_estimator
 from utils import model_saver
+
+from preprocessing import MinMaxNorm, StandardScaleNorm
 ################################################################################################################
 
 
@@ -275,6 +277,8 @@ class BSMDeTWrapper(nn.Module):
 
         self.create(lr=lr)
         self.cuda = cuda
+
+        self.scaler = MinMaxNorm()
     ###########################
 
     def create(self, lr=0.001):
@@ -314,13 +318,15 @@ class BSMDeTWrapper(nn.Module):
 
     def fit(self, in_x, in_y, samples=1):
         x, y = in_x.transpose(1, 2), in_y.transpose(1, 2)
+        x_scaled = self.scaler.fit_transform(x)
         # x, y = in_x, in_y
         self.optimizer.zero_grad()
         # print(x.shape, y.shape)
-        ave_losses, kl = self.model.sample_elbo_m(inputs=x,
+        ave_losses, kl = self.model.sample_elbo_m(inputs=x_scaled,
                                                   labels=y,
                                                   num_targets=self.num_targets,
-                                                  sample_nbr=samples)
+                                                  sample_nbr=samples,
+                                                  scaler=self.scaler)
 
         overall_loss = self.BayesianWeightLinear(ave_losses)
         overall_loss = overall_loss + kl
@@ -330,7 +336,7 @@ class BSMDeTWrapper(nn.Module):
 
         overall_loss.backward()
         self.optimizer.step()
-
+        print('here0', ave_losses.shape)
         return overall_loss, ave_losses, p_mu, p_rho
     ###########################
 

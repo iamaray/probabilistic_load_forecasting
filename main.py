@@ -9,7 +9,7 @@ model_wrapper = BSMDeTWrapper(cuda=False)
 trainer = BayesTrainer(model_wrapper=model_wrapper, train_loader=train_loader)
 
 # trainer.train()
-trainer.test(test_loader=test_loader)
+# trainer.test(test_loader=test_loader)
 
 # for x, y in train_loader:
 #     x = x.transpose(1, 2)
@@ -33,5 +33,5 @@ param_grid = {
 }
 training_args = {'epochs': 1}
 
-# grid_search_torch_model(model_class=BSMDeTWrapper, trainer_class=BayesTrainer,
-#                         param_grid=param_grid, training_args=training_args, train_loader=train_loader, test_loader=test_loader)
+grid_search_torch_model(model_class=BSMDeTWrapper, trainer_class=BayesTrainer,
+                        param_grid=param_grid, training_args=training_args, train_loader=train_loader, test_loader=test_loader)

@@ -64,7 +64,15 @@ def computeNetLoadTensor(df: pd.DataFrame, locations=[]):
         raise NotImplementedError('Not implemented.')
 
 
-def preprocess(csv_path=None, net_load_input=True, net_load_labels=True, variates=[], window_length=168, prediction_length=24, step_size=1, train_proportion=0.8):
+def preprocess(
+        csv_path=None,
+        net_load_input=True,
+        net_load_labels=True,
+        variates=[],
+        window_length=168,
+        prediction_length=24,
+        step_size=1,
+        train_proportion=0.8):
     """Preprocessing pipeline"""
 
     df, data_tensor = readtoFiltered(csv_path=csv_path, variates=variates)
@@ -93,3 +101,43 @@ def preprocess(csv_path=None, net_load_input=True, net_load_labels=True, variate
     test_loader = DataLoader(testset, batch_size=64, shuffle=False)
 
     return df, train_loader, test_loader
+
+
+class MinMaxNorm:
+    def __init__(self):
+        self.min_val = None
+        self.max_val = None
+
+    def fit(self, x: torch.Tensor):
+        self.max_val = torch.max(x, dim=1, keepdim=True).values
+        self.min_val = torch.min(x, dim=1, keepdim=True).values
+
+    def transform(self, x: torch.Tensor):
+        return (x - self.min_val) / (self.max_val - self.min_val)
+
+    def fit_transform(self, x: torch.Tensor):
+        self.fit(x)
+        return self.transform(x)
+
+    def reverse(self, transformed: torch.Tensor):
+        return (transformed * (self.max_val - self.min_val)) + self.min_val
+
+
+class StandardScaleNorm:
+    def __init__(self):
+        self.mean = None
+        self.std = None
+
+    def fit(self, x: torch.Tensor):
+        self.mean = x.mean(dim=1, keepdim=True)
+        self.std = x.std(dim=1, keepdim=True)
+
+    def transform(self, x: torch.Tensor):
+        return (x - self.mean) / self.std
+
+    def fit_transform(self, x: torch.Tensor):
+        self.fit(x)
+        return self.transform(x)
+
+    def reverse(self, transformed: torch.Tensor):
+        return (transformed * self.std) + self.mean

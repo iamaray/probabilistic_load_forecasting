@@ -8,11 +8,12 @@ import os
 from .model import BSMDeTWrapper
 # from torch.utils.tensorboard import SummaryWriter
 from .utils import loadDataforTrainVal
+from preprocessing import MinMaxNorm, StandardScaleNorm
 
 
 class BayesTrainer:
     def __init__(self, model_wrapper: BSMDeTWrapper = None, train_loader: DataLoader = None, input_size=24*3, output_size=1, batch_size=64, epochs=100,
-                 num_targets=3, num_aux_feats=13, window_len=72, ahead=1):
+                 num_targets=1, num_aux_feats=0, window_len=168, ahead=1):
         # GPU setup
         os.environ["CUDA_VISIBLE_DEVICES"] = "0"
         self.device = torch.device(
@@ -74,17 +75,18 @@ class BayesTrainer:
                 print(p_mu.cpu().detach().numpy())
                 print(p_rho.cpu().detach().numpy())
 
+                print('here1', self.num_targets)
                 for j in range(self.num_targets):
                     self.loss_train[epoch, j] += losses[j]
                 nb_samples += len(inputs)
 
                 end_time = datetime.datetime.now()
                 lasttime = (end_time - start_time) * (self.Nbatch - i) + (end_time - start_time) * self.Nbatch * (
-                    self.epochs - epoch - 1)
+                    epochs - epoch - 1)
 
                 loss_str = " ".join(
                     [f"loss{j+1}: {losses[j].item():.4f}" for j in range(self.num_targets)])
-                print(f" eta: {lasttime} epoch: {epoch+1:4d} in {self.epochs:4d}, batch: {i+1:5d} "
+                print(f" eta: {lasttime} epoch: {epoch+1:4d} in {epochs:4d}, batch: {i+1:5d} "
                       f"loss: {overall_loss.item():.4f} LossChange: {overall_loss.item() - lastloss:.4f} {loss_str}")
 
                 lastloss = overall_loss.item()
@@ -114,15 +116,8 @@ class BayesTrainer:
             outs = self.net.test(in_test=x_test, samples=samples)
 
             metric_val = np.array(metrics(outs, y_test.transpose(1, 2)))
-            # print('here0', type(metric_val))
-            # if i == 0:
-            #     metric_vals = metric_val
-            # else:
-            #     torch.stack([metric_vals, metric_val])
             metric_vals = np.append(metric_vals, metric_val)
-            print(i)
-            print(metric_vals)
-        # print('here', metric_vals.size)
+
         return torch.mean(metric_vals, dim=0)
 
     def _log_metrics(self, overall_loss, losses, p_mu, p_rho, epoch, batch):

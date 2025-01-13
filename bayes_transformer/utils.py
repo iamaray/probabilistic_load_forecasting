@@ -54,11 +54,15 @@ def variational_estimator(nn_class):
         return kl_divergence
     setattr(nn_class, "nn_kl_divergence", nn_kl_divergence)
 
-    def sample_elbo_m(self, inputs, labels, num_targets, sample_nbr):
+    def sample_elbo_m(self, inputs, labels, num_targets, sample_nbr, scaler):
         losses = torch.zeros(num_targets).to(inputs.device)
 
         for _ in range(sample_nbr):
             outs = self(inputs)
+            scaler.fit(labels)
+
+            scaler.reverse(outs)
+            
             rmses = torch.stack([rmse_loss(outs[:, :, i], labels[:, :, i])
                                  for i in range(num_targets)])
             losses = losses + rmses
