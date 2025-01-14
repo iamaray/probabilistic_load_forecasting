@@ -24,7 +24,13 @@ def readtoFiltered(csv_path, variates=[]):
     return filtered, torch.Tensor(filtered.values)
 
 
-def formPairs(x_tensor: torch.Tensor, y_tensor: torch.Tensor, net_load=True, window_length=168, prediction_length=24, step_size=1):
+def formPairs(
+        x_tensor: torch.Tensor,
+        y_tensor: torch.Tensor,
+        net_load=True,
+        window_length=168,
+        prediction_length=24,
+        step_size=1):
     """Takes a tensor with raw data and forms (X, y) pairs with a sliding window"""
 
     assert x_tensor.shape[0] == y_tensor.shape[0]

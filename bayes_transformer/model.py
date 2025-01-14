@@ -11,12 +11,10 @@ from .utils import variational_estimator
 from utils import model_saver
 
 from preprocessing import MinMaxNorm, StandardScaleNorm
-################################################################################################################
 
 
 def clones(module, N):
     return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
-###########################
 
 
 class MultiHeadedAttention(nn.Module):
@@ -41,7 +39,6 @@ class MultiHeadedAttention(nn.Module):
         x = x.transpose(1, 2).contiguous().view(
             nbatches, -1, self.h * self.d_k)
         return self.linears[-1](x)
-####################
 
 
 def attention(query, key, value, dropout=None):
@@ -51,7 +48,6 @@ def attention(query, key, value, dropout=None):
     if dropout is not None:
         p_attn = dropout(p_attn)
     return torch.matmul(p_attn, value), p_attn
-###############################
 
 
 class LayerNorm(nn.Module):
@@ -65,7 +61,6 @@ class LayerNorm(nn.Module):
         mean = x.mean(-1, keepdim=True)
         std = x.std(-1, keepdim=True)
         return self.a_2 * (x - mean) / (std + self.eps) + self.b_2
-#####################
 
 
 class SublayerConnection(nn.Module):
@@ -76,7 +71,6 @@ class SublayerConnection(nn.Module):
 
     def forward(self, x, sublayer):
         return self.norm(x + self.dropout(sublayer(x)))
-############################
 
 
 class PositionwiseFeedForward(nn.Module):
@@ -88,7 +82,6 @@ class PositionwiseFeedForward(nn.Module):
 
     def forward(self, x):
         return self.w_2(self.dropout(F.relu(self.w_1(x))))
-#####################
 
 
 class EncoderLayer(nn.Module):
@@ -108,7 +101,6 @@ class EncoderLayer(nn.Module):
     def forward(self, x):
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x))
         return self.sublayer[1](x, self.feed_forward)
-###############################
 
 
 class Encoder(nn.Module):
@@ -122,7 +114,6 @@ class Encoder(nn.Module):
         for layer in self.layers:
             x = layer(x)
         return self.norm(x)
-###############################
 
 
 class DecoderLayer(nn.Module):
@@ -143,7 +134,6 @@ class DecoderLayer(nn.Module):
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x))
         x = self.sublayer[1](x, lambda x: self.src_attn(x, m, m))
         return self.sublayer[2](x, self.feed_forward)
-#########################
 
 
 class Decoder(nn.Module):
@@ -162,7 +152,6 @@ class Decoder(nn.Module):
         for layer in self.layers:
             memory = layer(memory, decoderINPUT)
         return self.outputLinear2(self.outputLinear1(torch.flatten(input=self.outputLinear(self.norm(memory)), start_dim=1)))
-#################
 
 
 @variational_estimator
@@ -233,8 +222,6 @@ class BayesianMDeT(nn.Module):
             outputs = outputs.unsqueeze(-1)
         return outputs
 
-###########################################
-
 
 class BSMDeTWrapper(nn.Module):
     def __init__(self,
@@ -279,7 +266,6 @@ class BSMDeTWrapper(nn.Module):
         self.cuda = cuda
 
         self.scaler = MinMaxNorm()
-    ###########################
 
     def create(self, lr=0.001):
         self.model = BayesianMDeT(
@@ -314,7 +300,6 @@ class BSMDeTWrapper(nn.Module):
 
         self.device = torch.device(
             "cuda:0" if torch.cuda.is_available() else "cpu")
-    ###########################
 
     def fit(self, in_x, in_y, samples=1):
         x, y = in_x.transpose(1, 2), in_y.transpose(1, 2)
@@ -338,7 +323,6 @@ class BSMDeTWrapper(nn.Module):
         self.optimizer.step()
         print('here0', ave_losses.shape)
         return overall_loss, ave_losses, p_mu, p_rho
-    ###########################
 
     def test(self, in_test, samples=10):
         x_test = in_test.transpose(1, 2)
@@ -361,8 +345,6 @@ class BSMDeTWrapper(nn.Module):
             [self.model(x_test).cpu().detach()
              for _ in range(samples)],
             dim=-1)
-    ###########################
 
     def get_nb_parameters(self):
         return np.sum(p.numel() for p in self.model.parameters())
-#############
