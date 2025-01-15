@@ -2,21 +2,21 @@ from preprocessing import readtoFiltered, preprocess
 from bayes_transformer.model import BSMDeTWrapper
 from bayes_transformer.trainer import BayesTrainer
 from grid_search import grid_search_torch_model
+import torch
+from preprocessing import MinMaxNorm
 
-df, train_loader, test_loader = preprocess(
-    'data/upto_latest_actual.csv', variates=[])
-model_wrapper = BSMDeTWrapper(cuda=False)
-trainer = BayesTrainer(model_wrapper=model_wrapper, train_loader=train_loader)
+df, train_loader, test_loader, train_norm, test_norm = preprocess(
+    'data/ercot_data_2025_Jan.csv', variates=['marketday', 'ACTUAL_ERC_Load', 'ACTUAL_ERC_Solar', 'ACTUAL_ERC_Wind', 'hourending'])
 
-# trainer.train()
-# trainer.test(test_loader=test_loader)
+print(type(test_norm), type(train_norm))
+print(test_norm.min_val, train_norm.min_val)
+print(test_norm.max_val, train_norm.max_val)
 
-# for x, y in train_loader:
-#     x = x.transpose(1, 2)
-#     y = y.transpose(1, 2) 
+model_wrapper = BSMDeTWrapper(cuda=False, num_targets=1, num_aux_feats=1)
+trainer = BayesTrainer(model_wrapper=model_wrapper,
+                       train_loader=train_loader, train_norm=train_norm, test_norm=test_norm)
 
-#     o = model_wrapper.model(x)
-#     print(o.shape)
+trainer.train()
 
 param_grid = {
     'd_model': [16, 32, 64, 128, 256],

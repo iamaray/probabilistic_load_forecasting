@@ -13,7 +13,7 @@ from preprocessing import MinMaxNorm, StandardScaleNorm
 
 class BayesTrainer:
     def __init__(self, model_wrapper: BSMDeTWrapper = None, train_loader: DataLoader = None, input_size=24*3, output_size=1, batch_size=64, epochs=100,
-                 num_targets=1, num_aux_feats=0, window_len=168, ahead=1):
+                 num_targets=1, num_aux_feats=0, window_len=168, ahead=1, train_norm=None, test_norm=None):
         # GPU setup
         os.environ["CUDA_VISIBLE_DEVICES"] = "0"
         self.device = torch.device(
@@ -49,9 +49,21 @@ class BayesTrainer:
         self.mu_list = np.zeros((epochs, num_targets))
         self.rho_list = np.zeros((epochs, num_targets))
 
-        self.scaler = MinMaxNorm()
+        self.train_norm = train_norm
+        # if train_norm is None:
+        #     self.train_norm = MinMaxNorm()
+
+        self.test_norm = test_norm
+
+        print('here', type(train_norm), type(test_norm))
+        # if test_norm is None:
+        #     self.test_norm = MinMaxNorm()
+
+        # print('here', train_norm.min_value, test_norm.min_value)
+        # print('here1', train_norm.max_value, test_norm.max_value)
 
     def train(self, epochs=100):
+        self.net.train()
         for epoch in range(epochs):
             if epoch == 0:
                 ELBO_samples = 5
@@ -68,16 +80,15 @@ class BayesTrainer:
                 inputs = inputs.to(self.device).float()
                 labels = labels.to(self.device).float()
 
-                print(inputs.shape, labels.shape)
+                print(i)
                 overall_loss, losses, p_mu, p_rho = self.net.fit(
-                    in_x=inputs, in_y=labels, samples=ELBO_samples)
+                    in_x=inputs, in_y=labels, samples=ELBO_samples, scaler=self.train_norm)
 
                 self.mu_list[epoch] += p_mu.cpu().detach().numpy()
                 self.rho_list[epoch] += p_rho.cpu().detach().numpy()
                 print(p_mu.cpu().detach().numpy())
                 print(p_rho.cpu().detach().numpy())
 
-                print('here1', self.num_targets)
                 for j in range(self.num_targets):
                     self.loss_train[epoch, j] += losses[j]
                 nb_samples += len(inputs)
@@ -109,13 +120,15 @@ class BayesTrainer:
         return mse(torch.mean(x, dim=-1), y)
 
     def test(self, test_loader, metrics=None, samples=10):
+        self.net.eval()
         metric_vals = np.array([])
 
         if metrics is None:
             metrics = self._mse_of_mean
 
         for i, (x_test, y_test) in enumerate(test_loader):
-            outs = self.net.test(in_test=x_test, samples=samples)
+            outs = self.net.test(
+                in_test=x_test, samples=samples, scaler=self.test_norm)
 
             metric_val = np.array(metrics(outs, y_test.transpose(1, 2)))
             metric_vals = np.append(metric_vals, metric_val)

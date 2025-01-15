@@ -18,7 +18,6 @@ class BayesianLinear(nn.Module):
                  prior_dist=None):
         super().__init__()
 
-        # init parameters
         self.in_features = in_features
         self.out_features = out_features
         self.bias = bias
@@ -67,5 +66,11 @@ class BayesianLinear(nn.Module):
         self.log_variational_posterior = self.weight_sampler.log_posterior() + \
             b_log_posterior
         self.log_prior = self.weight_prior_dist.log_prior(w) + b_log_prior
+
+        if len(x.shape) == 3:
+            batch_size, seq_len, _ = x.shape
+            x_reshaped = x.reshape(-1, x.shape[-1])
+            output = F.linear(x_reshaped, w, b)
+            return output.reshape(batch_size, seq_len, self.out_features)
 
         return F.linear(x, w, b)

@@ -139,19 +139,25 @@ class DecoderLayer(nn.Module):
 class Decoder(nn.Module):
     def __init__(self, num_layers, d_model, num_targets, num_aux_feats, window_length, ahead, dropout, h, N, d_ff):
         super(Decoder, self).__init__()
-        feats = num_targets + num_aux_feats
+        feats = 1
         layer = DecoderLayer(
             d_model=d_model, dropout=dropout, h=h, d_ff=d_ff, N=N)
         self.layers = clones(layer, num_layers)
         self.norm = LayerNorm(layer.size)
         self.outputLinear = BayesianLinear(d_model, feats)
-        self.outputLinear1 = BayesianLinear(window_length*feats, window_length)
+        self.outputLinear1 = BayesianLinear(
+            window_length, window_length)
         self.outputLinear2 = BayesianLinear(window_length, ahead)
 
     def forward(self, memory, decoderINPUT):
         for layer in self.layers:
             memory = layer(memory, decoderINPUT)
-        return self.outputLinear2(self.outputLinear1(torch.flatten(input=self.outputLinear(self.norm(memory)), start_dim=1)))
+
+        # Shape: [batch, window_length, 1]
+        x = self.outputLinear(self.norm(memory))
+        x = x.squeeze(-1)  # Shape: [batch, window_length]
+        x = self.outputLinear1(x)  # Shape: [batch, window_length]
+        return self.outputLinear2(x)  # Shape: [batch, ahead]
 
 
 @variational_estimator
@@ -187,23 +193,24 @@ class BayesianMDeT(nn.Module):
         self.d_model = d_model
         num_feats = num_targets + num_aux_feats
         self.encoder = Encoder(num_layers=encoder_layers, d_model=d_model,
-                               dropout=encoder_dropout, d_ff=encoder_d_ff, N=encoder_sublayers, h=encoder_h)
+                               dropout=encoder_dropout, d_ff=encoder_d_ff,
+                               N=encoder_sublayers, h=encoder_h)
+
+        self.encoderLinear = BayesianLinear(num_feats, d_model)
+
+        self.decoder_linear_layers = nn.ModuleList()
+        for _ in range(num_targets):
+            self.decoder_linear_layers.append(
+                BayesianLinear(1 + num_aux_feats, d_model))
 
         self.decoders = nn.ModuleList()
         for _ in range(num_targets):
             self.decoders.append(Decoder(num_layers=decoder_layers, d_model=d_model, ahead=ahead, num_targets=num_targets,
                                          num_aux_feats=num_aux_feats, window_length=window_len, dropout=decoder_dropout, h=decoder_h, N=decoder_sublayers, d_ff=decoder_d_ff))
 
-        self.encoderLinear = BayesianLinear(num_feats, d_model)
-        self.decoder_linear_layers = nn.ModuleList()
-        for _ in range(num_targets):
-            self.decoder_linear_layers.append(
-                BayesianLinear(1 + num_aux_feats, d_model))
-
-    def forward(self, input: torch.Tensor):
+    def forward(self, x: torch.Tensor):
         # x = input.transpose(1, 2)
-        x = input
-        # print(x.shape)
+        # x = input
         # x: input data. shape (batch, window_len, num_targets + num_aux_feats)
         encoder_output = self.encoder(self.encoderLinear(x))
         # aux: Auxiliary information. shape (batch, window_len, num_aux_feats)
@@ -265,7 +272,8 @@ class BSMDeTWrapper(nn.Module):
         self.create(lr=lr)
         self.cuda = cuda
 
-        self.scaler = MinMaxNorm()
+        # self.train_scaler = train_scaler if train_scaler is not None else MinMaxNorm()
+        # self.test_scaler = test_scaler if test_scaler is not None else MinMaxNorm()
 
     def create(self, lr=0.001):
         self.model = BayesianMDeT(
@@ -301,9 +309,21 @@ class BSMDeTWrapper(nn.Module):
         self.device = torch.device(
             "cuda:0" if torch.cuda.is_available() else "cpu")
 
-    def fit(self, in_x, in_y, samples=1):
+    def fit(self, in_x, in_y, samples=1, scaler=None):
         x, y = in_x.transpose(1, 2), in_y.transpose(1, 2)
-        x_scaled = self.scaler.fit_transform(x)
+        # x_scaled = x
+        # if self.model.training:
+        #     print('fit', self.train_scaler.min_val)
+        #     x_scaled = self.train_scaler.transform(x)
+        # if not self.model.training:
+        #     x_scaled = self.test_scaler.transform(x)
+
+        x_scaled = x
+        if scaler is not None:
+            x_scaled = scaler.transform(x)
+        else:
+            x_scaled = MinMaxNorm().fit_transform(x)
+
         # x, y = in_x, in_y
         self.optimizer.zero_grad()
         # print(x.shape, y.shape)
@@ -311,7 +331,7 @@ class BSMDeTWrapper(nn.Module):
                                                   labels=y,
                                                   num_targets=self.num_targets,
                                                   sample_nbr=samples,
-                                                  scaler=self.scaler)
+                                                  scaler=scaler)
 
         overall_loss = self.BayesianWeightLinear(ave_losses)
         overall_loss = overall_loss + kl
@@ -321,12 +341,11 @@ class BSMDeTWrapper(nn.Module):
 
         overall_loss.backward()
         self.optimizer.step()
-        print('here0', ave_losses.shape)
         return overall_loss, ave_losses, p_mu, p_rho
 
-    def test(self, in_test, samples=10):
+    def test(self, in_test, samples=10, scaler=None):
         x_test = in_test.transpose(1, 2)
-        batch_size = x_test.shape[0]
+        # batch_size = x_test.shape[0]
         # outputs = [np.zeros((0, batch_size, self.ahead))
         #            for _ in range(self.num_targets)]
 
@@ -341,9 +360,16 @@ class BSMDeTWrapper(nn.Module):
         #     outputs[i] = torch.cat(
         #         [outputs[i]], axis=0).unsqueeze(-1)
 
+        # x_in = self.test_scaler.transform(x_test)
+        x_scaled = x
+        if scaler is not None:
+            x_scaled = scaler.transform(x)
+        else:
+            x_scaled = MinMaxNorm().fit_transform(x)
+
         return torch.stack(
-            [self.model(x_test).cpu().detach()
-             for _ in range(samples)],
+            [self.test_scaler.reverse(self.model(x_in).cpu().detach()
+             for _ in range(samples))],
             dim=-1)
 
     def get_nb_parameters(self):
