@@ -16,9 +16,9 @@ model_wrapper = BSMDeTWrapper(cuda=False, num_targets=1, num_aux_feats=1)
 trainer = BayesTrainer(model_wrapper=model_wrapper,
                        train_loader=train_loader, train_norm=train_norm, test_norm=test_norm)
 
-trainer.train()
-
 param_grid = {
+    'num_targets': [1],
+    'num_aux_feats': [1],
     'd_model': [16, 32, 64, 128, 256],
     'encoder_layers': [2, 3, 4],
     'encoder_d_ff': [64, 128, 256],
@@ -29,9 +29,16 @@ param_grid = {
     'decoder_dropout': [0.1, 0.2],
     'decoder_h': [8, 16, 32],
     'decoder_d_ff': [64, 128, 256],
-    'decoder_sublayers': [3, 4],
+    'decoder_sublayers': [3, 4]
 }
 training_args = {'epochs': 1}
 
-grid_search_torch_model(model_class=BSMDeTWrapper, trainer_class=BayesTrainer,
-                        param_grid=param_grid, training_args=training_args, train_loader=train_loader, test_loader=test_loader)
+grid_search_torch_model(
+    model_class=BSMDeTWrapper,
+    trainer_class=BayesTrainer,
+    param_grid=param_grid,
+    training_args=training_args,
+    train_loader=train_loader,
+    test_loader=test_loader,
+    train_norm=train_norm,
+    test_norm=test_norm)
