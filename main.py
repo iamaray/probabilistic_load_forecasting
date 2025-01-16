@@ -6,19 +6,24 @@ import torch
 from preprocessing import MinMaxNorm
 
 df, train_loader, test_loader, train_norm, test_norm = preprocess(
-    'data/ercot_data_2025_Jan.csv', variates=['marketday', 'ACTUAL_ERC_Load', 'ACTUAL_ERC_Solar', 'ACTUAL_ERC_Wind', 'hourending'])
+    csv_path='data/ercot_data_2025_Jan.csv',
+    net_load_input=False,
+    variates=['marketday', 'ACTUAL_ERC_Load', 'ACTUAL_ERC_Solar', 'ACTUAL_ERC_Wind', 'hourending'])
 
-print(type(test_norm), type(train_norm))
-print(test_norm.min_val, train_norm.min_val)
-print(test_norm.max_val, train_norm.max_val)
+# print(type(test_norm), type(train_norm))
+# print(test_norm.min_val, train_norm.min_val)
+# print(test_norm.max_val, train_norm.max_val)
 
-model_wrapper = BSMDeTWrapper(cuda=False, num_targets=1, num_aux_feats=1)
-trainer = BayesTrainer(model_wrapper=model_wrapper,
-                       train_loader=train_loader, train_norm=train_norm, test_norm=test_norm)
+# for x, _ in train_loader:
+#     print(x.shape)
+
+# model_wrapper = BSMDeTWrapper(cuda=False, num_targets=1, num_aux_feats=3)
+# trainer = BayesTrainer(model_wrapper=model_wrapper,
+#                        train_loader=train_loader, train_norm=train_norm, test_norm=test_norm)
 
 param_grid = {
     'num_targets': [1],
-    'num_aux_feats': [1],
+    'num_aux_feats': [3],
     'd_model': [16, 32, 64, 128, 256],
     'encoder_layers': [2, 3, 4],
     'encoder_d_ff': [64, 128, 256],
