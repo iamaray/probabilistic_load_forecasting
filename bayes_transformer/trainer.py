@@ -13,7 +13,9 @@ from preprocessing import MinMaxNorm, StandardScaleNorm
 
 class BayesTrainer:
     def __init__(self, model_wrapper: BSMDeTWrapper = None, train_loader: DataLoader = None, input_size=24*3, output_size=1, batch_size=64, epochs=100,
-                 num_targets=1, num_aux_feats=0, window_len=168, ahead=1, train_norm=None, test_norm=None):
+                 num_targets=1, num_aux_feats=0, window_len=168, ahead=1, train_norm=None, test_norm=None, modelsave=False):
+        self.modelsave = modelsave
+
         # GPU setup
         os.environ["CUDA_VISIBLE_DEVICES"] = "0"
         self.device = torch.device(
@@ -110,14 +112,15 @@ class BayesTrainer:
             self.mu_list[epoch] = self.mu_list[epoch] / self.Nbatch
             self.rho_list[epoch] = self.rho_list[epoch] / self.Nbatch
 
-        self._save_model()
+        if self.modelsave:
+            self._save_model()
         print('Finished Training')
 
     def _mse_of_mean(self, x: torch.Tensor, y: torch.Tensor):
         assert len(x.shape) == 4 and len(y.shape) == 3
 
-        mse = nn.L1Loss()
-        return mse(torch.mean(x, dim=-1), y)
+        mae = nn.L1Loss()
+        return mae(torch.mean(x, dim=-1), y)
 
     def test(self, test_loader, metrics=None, samples=10):
         self.net.eval()
@@ -133,7 +136,7 @@ class BayesTrainer:
             metric_val = np.array(metrics(outs, y_test.transpose(1, 2)))
             metric_vals = np.append(metric_vals, metric_val)
 
-        return torch.mean(metric_vals, dim=0)
+        return np.mean(metric_vals, axis=0)
 
     def _log_metrics(self, overall_loss, losses, p_mu, p_rho, epoch, batch):
         # step = self.Nbatch * epoch + batch
@@ -154,3 +157,10 @@ class BayesTrainer:
         np.save(self.savepath + "mu_list", np.asarray(self.mu_list))
         np.save(self.savepath + "rho_list", np.asarray(self.rho_list))
         np.save(self.savepath + "loss_train", np.asarray(self.loss_train))
+
+    def save_model(self, savepath='modelsave/bmdet/', savename='bmdet_best.pt'):
+        torch.save(self.net, savepath + savename)
+
+        np.save(savepath + "mu_list", np.asarray(self.mu_list))
+        np.save(savepath + "rho_list", np.asarray(self.rho_list))
+        np.save(savepath + "loss_train", np.asarray(self.loss_train))

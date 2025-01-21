@@ -82,27 +82,34 @@ class LSTM(nn.LSTM):
 
 
 class Net(nn.Module):
-    def __init__(self, params):
+    def __init__(self, num_class: int, embedding_dim: int, cov_dim: int, lstm_hidden_dim: int,
+                 lstm_layers: int, lstm_dropout: float, device: str, predict_steps: int,
+                 predict_start: int, sample_times: int):
         '''
         We define a recurrent network that predicts the future values of a time-dependent variable based on
         past inputs and covariates.
         '''
         super(Net, self).__init__()
-        self.params = params
-        self.embedding = nn.Embedding(params.num_class, params.embedding_dim)
+        self.num_class = num_class
+        self.embedding_dim = embedding_dim
+        self.cov_dim = cov_dim
+        self.lstm_hidden_dim = lstm_hidden_dim
+        self.lstm_layers = lstm_layers
+        self.lstm_dropout = lstm_dropout
+        self.device = device
+        self.predict_steps = predict_steps
+        self.predict_start = predict_start
+        self.sample_times = sample_times
 
-        self.lstm = nn.LSTM(input_size=1+params.cov_dim+params.embedding_dim,
-                            hidden_size=params.lstm_hidden_dim,
-                            num_layers=params.lstm_layers,
+        self.embedding = nn.Embedding(num_class, embedding_dim)
+
+        self.lstm = nn.LSTM(input_size=1+cov_dim+embedding_dim,
+                            hidden_size=lstm_hidden_dim,
+                            num_layers=lstm_layers,
                             bias=True,
                             batch_first=False,
-                            dropout=params.lstm_dropout)
-        '''self.lstm = nn.LSTM(input_size=1 + params.cov_dim,
-                            hidden_size=params.lstm_hidden_dim,
-                            num_layers=params.lstm_layers,
-                            bias=True,
-                            batch_first=False,
-                            dropout=params.lstm_dropout)'''
+                            dropout=lstm_dropout)
+
         # initialize LSTM forget gate bias to be 1 as recommended by http://proceedings.mlr.press/v37/jozefowicz15.pdf
         for names in self.lstm._all_weights:
             for name in filter(lambda n: "bias" in n, names):
@@ -112,10 +119,9 @@ class Net(nn.Module):
                 bias.data[start:end].fill_(1.)
 
         self.relu = nn.ReLU()
-        self.distribution_mu = nn.Linear(
-            params.lstm_hidden_dim * params.lstm_layers, 1)
+        self.distribution_mu = nn.Linear(lstm_hidden_dim * lstm_layers, 1)
         self.distribution_presigma = nn.Linear(
-            params.lstm_hidden_dim * params.lstm_layers, 1)
+            lstm_hidden_dim * lstm_layers, 1)
         self.distribution_sigma = nn.Softplus()
 
     def forward(self, x, idx, hidden, cell):
@@ -132,8 +138,7 @@ class Net(nn.Module):
             hidden ([lstm_layers, batch_size, lstm_hidden_dim]): LSTM h from time step t
             cell ([lstm_layers, batch_size, lstm_hidden_dim]): LSTM c from time step t
         '''
-        onehot_embed = self.embedding(
-            idx)  # TODO: is it possible to do this only once per window instead of per step?
+        onehot_embed = self.embedding(idx)
         lstm_input = torch.cat((x, onehot_embed), dim=2)
         output, (hidden, cell) = self.lstm(lstm_input, (hidden, cell))
         # use h from all three layers to calculate mu and sigma
@@ -146,28 +151,28 @@ class Net(nn.Module):
         return torch.squeeze(mu), torch.squeeze(sigma), hidden, cell
 
     def init_hidden(self, input_size):
-        return torch.zeros(self.params.lstm_layers, input_size, self.params.lstm_hidden_dim, device=self.params.device)
+        return torch.zeros(self.lstm_layers, input_size, self.lstm_hidden_dim, device=self.device)
 
     def init_cell(self, input_size):
-        return torch.zeros(self.params.lstm_layers, input_size, self.params.lstm_hidden_dim, device=self.params.device)
+        return torch.zeros(self.lstm_layers, input_size, self.lstm_hidden_dim, device=self.device)
 
     def test(self, x, v_batch, id_batch, hidden, cell, sampling=False):
         batch_size = x.shape[1]
         if sampling:
-            samples = torch.zeros(self.params.sample_times, batch_size, self.params.predict_steps,
-                                  device=self.params.device)
-            for j in range(self.params.sample_times):
+            samples = torch.zeros(self.sample_times, batch_size, self.predict_steps,
+                                  device=self.device)
+            for j in range(self.sample_times):
                 decoder_hidden = hidden
                 decoder_cell = cell
-                for t in range(self.params.predict_steps):
-                    mu_de, sigma_de, decoder_hidden, decoder_cell = self(x[self.params.predict_start + t].unsqueeze(0),
+                for t in range(self.predict_steps):
+                    mu_de, sigma_de, decoder_hidden, decoder_cell = self(x[self.predict_start + t].unsqueeze(0),
                                                                          id_batch, decoder_hidden, decoder_cell)
                     gaussian = torch.distributions.normal.Normal(
                         mu_de, sigma_de)
                     pred = gaussian.sample()  # not scaled
                     samples[j, :, t] = pred * v_batch[:, 0] + v_batch[:, 1]
-                    if t < (self.params.predict_steps - 1):
-                        x[self.params.predict_start + t + 1, :, 0] = pred
+                    if t < (self.predict_steps - 1):
+                        x[self.predict_start + t + 1, :, 0] = pred
 
             sample_mu = torch.median(samples, dim=0)[0]
             sample_sigma = samples.std(dim=0)
@@ -177,16 +182,16 @@ class Net(nn.Module):
             decoder_hidden = hidden
             decoder_cell = cell
             sample_mu = torch.zeros(
-                batch_size, self.params.predict_steps, device=self.params.device)
+                batch_size, self.predict_steps, device=self.device)
             sample_sigma = torch.zeros(
-                batch_size, self.params.predict_steps, device=self.params.device)
-            for t in range(self.params.predict_steps):
-                mu_de, sigma_de, decoder_hidden, decoder_cell = self(x[self.params.predict_start + t].unsqueeze(0),
+                batch_size, self.predict_steps, device=self.device)
+            for t in range(self.predict_steps):
+                mu_de, sigma_de, decoder_hidden, decoder_cell = self(x[self.predict_start + t].unsqueeze(0),
                                                                      id_batch, decoder_hidden, decoder_cell)
                 sample_mu[:, t] = mu_de * v_batch[:, 0] + v_batch[:, 1]
                 sample_sigma[:, t] = sigma_de * v_batch[:, 0]
-                if t < (self.params.predict_steps - 1):
-                    x[self.params.predict_start + t + 1, :, 0] = mu_de
+                if t < (self.predict_steps - 1):
+                    x[self.predict_start + t + 1, :, 0] = mu_de
             return sample_mu, sample_sigma
 
 

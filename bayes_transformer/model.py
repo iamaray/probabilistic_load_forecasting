@@ -236,7 +236,7 @@ class BSMDeTWrapper(nn.Module):
                  num_targets=1,
                  num_aux_feats=0,
                  window_len=168,
-                 cuda=False,
+                 cuda=True,
                  name="BSMDeT",
                  d_model=32,
                  encoder_layers=2,
@@ -344,7 +344,7 @@ class BSMDeTWrapper(nn.Module):
         return overall_loss, ave_losses, p_mu, p_rho
 
     def test(self, in_test, samples=10, scaler=None):
-        x_test = in_test.transpose(1, 2)
+        x_test = in_test.transpose(1, 2).to(self.device)
         # batch_size = x_test.shape[0]
         # outputs = [np.zeros((0, batch_size, self.ahead))
         #            for _ in range(self.num_targets)]
@@ -361,15 +361,15 @@ class BSMDeTWrapper(nn.Module):
         #         [outputs[i]], axis=0).unsqueeze(-1)
 
         # x_in = self.test_scaler.transform(x_test)
-        x_scaled = x
+        x_scaled = x_test
         if scaler is not None:
-            x_scaled = scaler.transform(x)
+            x_scaled = scaler.transform(x_scaled)
         else:
-            x_scaled = MinMaxNorm().fit_transform(x)
+            x_scaled = MinMaxNorm().fit_transform(x_scaled)
 
         return torch.stack(
-            [self.test_scaler.reverse(self.model(x_in).cpu().detach()
-             for _ in range(samples))],
+            [scaler.reverse(self.model(x_scaled)).cpu().detach()
+             for _ in range(samples)],
             dim=-1)
 
     def get_nb_parameters(self):

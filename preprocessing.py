@@ -6,15 +6,18 @@ from datetime import datetime
 
 
 class MinMaxNorm:
-    def __init__(self):
+    def __init__(self, device='cuda'):
+        self.device = device
         self.min_val = None
         self.max_val = None
 
     # TODO: fix this
     def fit(self, x: torch.Tensor):
 
-        self.max_val = torch.max(x, dim=0, keepdim=True).values
-        self.min_val = torch.min(x, dim=0, keepdim=True).values
+        self.max_val = torch.max(
+            x, dim=0, keepdim=True).values.to(self.device).float()
+        self.min_val = torch.min(
+            x, dim=0, keepdim=True).values.to(self.device).float()
 
     def transform(self, x: torch.Tensor):
         return (x - self.min_val) / (self.max_val - self.min_val)
@@ -24,7 +27,7 @@ class MinMaxNorm:
         return self.transform(x)
 
     def reverse(self, transformed: torch.Tensor):
-        return (transformed * (self.max_val - self.min_val)) + self.min_val
+        return ((transformed * (self.max_val - self.min_val)) + self.min_val).to(self.device)
 
 
 class StandardScaleNorm:
@@ -72,7 +75,6 @@ def readtoFiltered(csv_path, variates=[]):
 def formPairs(
         x_tensor: torch.Tensor,
         y_tensor: torch.Tensor,
-        net_load=True,
         window_length=168,
         prediction_length=24,
         step_size=1):
@@ -106,6 +108,48 @@ def formPairs(
     return X, Y
 
 
+def formARPairs(x_tensor: torch.Tensor,
+                y_tensor: torch.Tensor,
+                num_targets: int = 1,
+                num_auxiliary: int = 0,
+                window_length=168,
+                prediction_length=24,
+                step_size=1):
+    """Forms (X, y) pairs for autoregression where x_i = x_{0:T-1} with x_0=0 and y_i = y_{1:T}"""
+
+    assert x_tensor.shape[0] == y_tensor.shape[0]
+    N = x_tensor.shape[0]
+
+    window_end = window_length
+
+    X = []
+    Y = []
+
+    while window_end <= N:
+        x = x_tensor[window_end - window_length:window_end]
+        y = y_tensor[window_end - window_length:window_end]
+
+        x_ar = x.clone()
+        x_ar[1:, :num_targets] = x[:-1, :num_targets]
+        x_ar[0, :num_targets] = 0
+
+        if num_auxiliary > 0:
+            x_ar[:, num_targets:] = x[:, num_targets:]
+
+        x_ar = x_ar.unsqueeze(0) if x_ar.ndim == 1 else x_ar.transpose(0, 1)
+        y = y.unsqueeze(0) if y.ndim == 1 else y.transpose(0, 1)
+
+        X.append(x_ar)
+        Y.append(y)
+
+        window_end += step_size
+
+    X = torch.stack(X)
+    Y = torch.stack(Y)
+
+    return X, Y
+
+
 def computeNetLoadTensor(df: pd.DataFrame, locations=[]):
     # TODO: generalize
     if len(locations) == 0:
@@ -119,6 +163,7 @@ def preprocess(
         csv_path=None,
         net_load_input=True,
         net_load_labels=True,
+        auto_reg=False,
         variates=[],
         window_length=168,
         prediction_length=24,
@@ -179,19 +224,47 @@ def preprocess(
         test_norm = data_norm()
         test_norm.fit(y_test_raw)
 
-    x_train, y_train = formPairs(
-        x_tensor=x_train_raw,
-        y_tensor=y_train_raw,
-        window_length=window_length,
-        prediction_length=prediction_length,
-        step_size=step_size)
+    x_train, y_train = None, None
+    x_test, y_test = None, None
 
-    x_test, y_test = formPairs(
-        x_tensor=x_test_raw,
-        y_tensor=y_test_raw,
-        window_length=window_length,
-        prediction_length=prediction_length,
-        step_size=step_size)
+    if not auto_reg:
+        x_train, y_train = formPairs(
+            x_tensor=x_train_raw,
+            y_tensor=y_train_raw,
+            window_length=window_length,
+            prediction_length=prediction_length,
+            step_size=step_size)
+
+        x_test, y_test = formPairs(
+            x_tensor=x_test_raw,
+            y_tensor=y_test_raw,
+            window_length=window_length,
+            prediction_length=prediction_length,
+            step_size=step_size)
+    else:
+        num_targets, num_aux = 1, 1
+        if net_load_input and net_load_labels:
+            num_targets, num_aux = 3, 1
+        elif not net_load_input and net_load_labels:
+            num_targets, num_aux = 1, 3
+
+        x_train, y_train = formARPairs(
+            x_tensor=x_train_raw,
+            y_tensor=y_train_raw,
+            num_targets=num_targets,
+            num_auxiliary=num_aux,
+            window_length=window_length,
+            prediction_length=prediction_length,
+            step_size=step_size)
+
+        x_test, y_test = formARPairs(
+            x_tensor=x_test_raw,
+            y_tensor=y_test_raw,
+            num_targets=num_targets,
+            num_auxiliary=num_aux,
+            window_length=window_length,
+            prediction_length=prediction_length,
+            step_size=step_size)
 
     trainset = TensorDataset(x_train, y_train)
     train_loader = DataLoader(dataset=trainset, batch_size=64, shuffle=True)

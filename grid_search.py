@@ -16,7 +16,8 @@ def grid_search_torch_model(
         test_loader,
         criterion=None,
         device='cpu',
-        savedir='BSMDeT_results',
+        savedir='modelsave',
+        savename='bmdet_best_model',
         train_norm=None,
         test_norm=None):
 
@@ -26,8 +27,12 @@ def grid_search_torch_model(
     best_score = float('inf')
 
     for params in param_combinations:
+
+        print(f"Evaluating params: {params}")
+
         param_dict = dict(zip(param_grid.keys(), params))
-        model = model_class(**param_dict).to(device)
+        # model = model_class(**param_dict).to(device)
+        model = model_class(**param_dict)
         trainer = trainer_class(
             model_wrapper=model, train_loader=train_loader, train_norm=train_norm, test_norm=test_norm)
 
