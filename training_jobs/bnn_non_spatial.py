@@ -27,17 +27,17 @@ if __name__ == "__main__":
     param_grid = {
         'num_targets': [1],
         'num_aux_feats': [1],
-        'd_model': [32, 64, 128],
-        'encoder_layers': [2, 3, 4],
-        'encoder_d_ff': [128, 256],
-        'encoder_sublayers': [2, 3],
-        'encoder_h': [8, 16],
+        'd_model': [32, 64],
+        'encoder_layers': [2,3],
+        'encoder_d_ff': [128],
+        'encoder_sublayers': [2],
+        'encoder_h': [8],
         'encoder_dropout': [0.1],
-        'decoder_layers': [2, 3, 4],
-        'decoder_dropout': [0.1, 0.2],
-        'decoder_h': [8, 16, 32],
-        'decoder_d_ff': [128, 256],
-        'decoder_sublayers': [3, 4],
+        'decoder_layers': [2, 3],
+        'decoder_dropout': [0.1],
+        'decoder_h': [8],
+        'decoder_d_ff': [128],
+        'decoder_sublayers': [3],
         'cuda': [True]
     }
 

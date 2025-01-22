@@ -82,9 +82,9 @@ class LSTM(nn.LSTM):
 
 
 class Net(nn.Module):
-    def __init__(self, num_class: int, embedding_dim: int, cov_dim: int, lstm_hidden_dim: int,
-                 lstm_layers: int, lstm_dropout: float, device: str, predict_steps: int,
-                 predict_start: int, sample_times: int):
+    def __init__(self, num_class: int = 100, embedding_dim: int = 32, cov_dim: int = 4, lstm_hidden_dim: int = 128,
+                 lstm_layers: int = 3, lstm_dropout: float = 0.1, device: str = 'cuda', predict_steps: int = 24,
+                 predict_start: int = 0, sample_times: int = 100):
         '''
         We define a recurrent network that predicts the future values of a time-dependent variable based on
         past inputs and covariates.

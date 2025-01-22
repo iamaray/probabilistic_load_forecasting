@@ -4,14 +4,16 @@ from bayes_transformer.trainer import BayesTrainer
 from grid_search import grid_search_torch_model
 import torch
 from preprocessing import MinMaxNorm
-
+from datetime import datetime
 
 if __name__ == "__main__":
     df, train_loader, test_loader, train_norm, test_norm = preprocess(
         csv_path='data/ercot_data_2025_Jan.csv',
         net_load_input=True,
+        train_end_date=(datetime(2023, 3, 1), 23),
         variates=['marketday', 'ACTUAL_ERC_Load',
-                  'ACTUAL_ERC_Solar', 'ACTUAL_ERC_Wind', 'hourending'])
+                  'ACTUAL_ERC_Solar', 'ACTUAL_ERC_Wind', 'hourending'],
+        device='cuda')
 
     # print(type(test_norm), type(train_norm))
     # print(test_norm.min_val, train_norm.min_val)

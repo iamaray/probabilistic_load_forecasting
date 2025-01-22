@@ -169,9 +169,10 @@ def preprocess(
         prediction_length=24,
         step_size=1,
         train_start_date=(datetime(2023, 2, 1), 0),  # date, hour,
-        train_end_date=(datetime(2024, 5, 31), 23),
-        test_start_date=(datetime(2024, 6, 1), 0),
+        train_end_date=(datetime(2024, 6, 30), 23),
+        test_start_date=(datetime(2024, 7, 1), 0),
         test_end_date=(datetime(2025, 1, 8), 13),
+        device='cuda',
         data_norm=MinMaxNorm):
     """Preprocessing pipeline"""
 
@@ -218,10 +219,10 @@ def preprocess(
     test_norm = None
 
     if data_norm is not None:
-        train_norm = data_norm()
+        train_norm = data_norm(device=device)
         train_norm.fit(y_train_raw)
 
-        test_norm = data_norm()
+        test_norm = data_norm(device=device)
         test_norm.fit(y_test_raw)
 
     x_train, y_train = None, None

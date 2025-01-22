@@ -42,15 +42,15 @@ from .model import Net, loss_fn
 
 
 class DeepARTrainer:
-    def __init__(self, model: nn.Module, optimizer: optim, loss_fn, train_loader: DataLoader,
-                 test_loader: DataLoader, device: str, train_window: int):
+    def __init__(self, model: nn.Module, train_loader: DataLoader,
+                 test_loader: DataLoader, device: str = 'cuda'):
         self.model = model
-        self.optimizer = optimizer
+        self.optimizer = optim.Adam(params=model.parameters(), lr=0.001)
         self.loss_fn = loss_fn
         self.train_loader = train_loader
         self.test_loader = test_loader
         self.device = device
-        self.train_window = train_window
+        self.train_window = 168
 
     def train(self, num_epochs: int) -> list:
         '''Train the model for multiple epochs.

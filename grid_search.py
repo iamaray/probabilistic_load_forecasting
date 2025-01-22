@@ -16,8 +16,8 @@ def grid_search_torch_model(
         test_loader,
         criterion=None,
         device='cpu',
-        savedir='modelsave',
-        savename='bmdet_best_model',
+        savedir='modelsave/bmdet/',
+        savename='bmdet_best_model.pt',
         train_norm=None,
         test_norm=None):
 
@@ -26,6 +26,7 @@ def grid_search_torch_model(
     best_params = None
     best_score = float('inf')
 
+    best_trainer = None
     for params in param_combinations:
 
         print(f"Evaluating params: {params}")
@@ -44,7 +45,16 @@ def grid_search_torch_model(
             best_score = val_loss
             best_model = model
             best_params = param_dict
+            best_trainer = trainer
 
-    torch.save(best_model.state_dict(), f'{savedir}/best_model_params.pth')
+    # torch.save(best_model.state_dict(), f'{savedir}/best_model_params.pth')
+    if best_trainer is not None:
+        best_trainer.save_model(savepath=savedir, savename=savename)
+    else:
+        print('Best model NOT saved :(')
+
+    # if isinstance(best_model, BSMDeTWrapper):
+    #     torch.save(model.model)
+
     with open(f'{savedir}/best_hyperparams.json', 'w') as f:
         json.dump(best_params, f)
