@@ -319,10 +319,10 @@ class BSMDeTWrapper(nn.Module):
         #     x_scaled = self.test_scaler.transform(x)
 
         x_scaled = x
+        y_scaled = y
         if scaler is not None:
             x_scaled = scaler.transform(x)
-        else:
-            x_scaled = MinMaxNorm().fit_transform(x)
+            y_scaled = scaler.transform(y)
 
         # x, y = in_x, in_y
         self.optimizer.zero_grad()
@@ -343,8 +343,12 @@ class BSMDeTWrapper(nn.Module):
         self.optimizer.step()
         return overall_loss, ave_losses, p_mu, p_rho
 
-    def test(self, in_test, samples=10, scaler=None):
-        x_test = in_test.transpose(1, 2).to(self.device)
+    def test(self, in_test, samples=10, scaler=None, force_cpu=True):
+        x_test = in_test
+        if force_cpu:
+            x_test = x_test.transpose(1, 2).to(torch.device('cpu'))
+        else:
+            x_test = in_test.transpose(1, 2).to(self.device)
         # batch_size = x_test.shape[0]
         # outputs = [np.zeros((0, batch_size, self.ahead))
         #            for _ in range(self.num_targets)]
@@ -367,10 +371,16 @@ class BSMDeTWrapper(nn.Module):
         else:
             x_scaled = MinMaxNorm().fit_transform(x_scaled)
 
-        return torch.stack(
-            [scaler.reverse(self.model(x_scaled)).cpu().detach()
-             for _ in range(samples)],
-            dim=-1)
+        if force_cpu:
+            return torch.stack(
+                [scaler.reverse(self.model(x_scaled))
+                 for _ in range(samples)],
+                dim=-1)
+        else:
+            return torch.stack(
+                [scaler.reverse(self.model(x_scaled)).cpu().detach()
+                 for _ in range(samples)],
+                dim=-1)
 
     def get_nb_parameters(self):
         return np.sum(p.numel() for p in self.model.parameters())
