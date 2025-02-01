@@ -5,6 +5,7 @@ import torch.optim as optim
 import itertools
 from bayes_transformer.model import BSMDeTWrapper
 import json
+from metrics import compute_metrics
 
 
 def grid_search_torch_model(
@@ -24,11 +25,10 @@ def grid_search_torch_model(
     param_combinations = list(itertools.product(*param_grid.values()))
     best_model = None
     best_params = None
-    best_score = float('inf')
+    best_acr_diff = float('inf')
 
-    best_trainer = None
     for params in param_combinations:
-
+        print(len(param_combinations))
         print(f"Evaluating params: {params}")
 
         param_dict = dict(zip(param_grid.keys(), params))
@@ -38,14 +38,27 @@ def grid_search_torch_model(
             model_wrapper=model, train_loader=train_loader, train_norm=train_norm, test_norm=test_norm)
 
         trainer.train(**training_args)
-        val_loss = trainer.test(test_loader=test_loader)
+        # val_loss = trainer.test(test_loader=test_loader)
+
+        outs = []
+        metrics = []
+        for (x, y) in test_loader:
+            out = model.test(in_test=x.to(device),
+                             samples=20, scaler=train_norm)
+            print('here')
+            outs.append(out)
+            y = y.transpose(1, 2)
+            metrics.append(compute_metrics(out, y))
+
+        # closeness to 0.8
+        acr = np.mean([m['avg_coverage_rate'] for m in metrics])
+        acr_diff = np.abs(0.8 - acr)
 
         print(f'Computed val loss of {val_loss}, comparing with {best_score}.')
-        if val_loss < best_score:
-            best_score = val_loss
+        if acr_diff < best_acr_diff:
+            best_score = acr_diff
             best_model = model
             best_params = param_dict
-            best_trainer = trainer
 
     # torch.save(best_model.state_dict(), f'{savedir}/best_model_params.pth')
     if best_trainer is not None:

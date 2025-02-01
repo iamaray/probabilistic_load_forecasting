@@ -9,6 +9,8 @@ from .utils import rmse_loss
 from .layers import BayesianLinear
 from .utils import variational_estimator
 from utils import model_saver
+from torch.cuda.amp import autocast, GradScaler
+
 
 from preprocessing import MinMaxNorm, StandardScaleNorm
 
@@ -236,7 +238,6 @@ class BSMDeTWrapper(nn.Module):
                  num_targets=1,
                  num_aux_feats=0,
                  window_len=168,
-                 cuda=True,
                  name="BSMDeT",
                  d_model=32,
                  encoder_layers=2,
@@ -255,7 +256,7 @@ class BSMDeTWrapper(nn.Module):
         self.ahead = ahead
         self.num_aux_feats = num_aux_feats
         self.window_len = window_len
-        self.cuda = cuda
+        # self.cuda = cuda
         self.name = name
         self.d_model = d_model
         self.encoder_layers = encoder_layers
@@ -270,7 +271,8 @@ class BSMDeTWrapper(nn.Module):
         self.decoder_sublayers = decoder_sublayers
 
         self.create(lr=lr)
-        self.cuda = cuda
+        # self.cuda = cuda
+        self.grad_scaler = GradScaler()
 
         # self.train_scaler = train_scaler if train_scaler is not None else MinMaxNorm()
         # self.test_scaler = test_scaler if test_scaler is not None else MinMaxNorm()
@@ -296,9 +298,9 @@ class BSMDeTWrapper(nn.Module):
 
         self.BayesianWeightLinear = taskbalance(num=self.num_targets)
 
-        if self.cuda:
-            self.model.cuda()
-            self.BayesianWeightLinear.cuda()
+        # if self.cuda:
+        #     self.model.cuda()
+        #     self.BayesianWeightLinear.cuda()
 
         print('    Total params: %.2fM' %
               (self.get_nb_parameters() / 1000000.0))
@@ -306,17 +308,8 @@ class BSMDeTWrapper(nn.Module):
                                            {'params': self.BayesianWeightLinear.parameters()}],
                                           lr=lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0)
 
-        self.device = torch.device(
-            "cuda:0" if torch.cuda.is_available() else "cpu")
-
     def fit(self, in_x, in_y, samples=1, scaler=None):
         x, y = in_x.transpose(1, 2), in_y.transpose(1, 2)
-        # x_scaled = x
-        # if self.model.training:
-        #     print('fit', self.train_scaler.min_val)
-        #     x_scaled = self.train_scaler.transform(x)
-        # if not self.model.training:
-        #     x_scaled = self.test_scaler.transform(x)
 
         x_scaled = x
         y_scaled = y
@@ -324,31 +317,36 @@ class BSMDeTWrapper(nn.Module):
             x_scaled = scaler.transform(x)
             y_scaled = scaler.transform(y)
 
-        # x, y = in_x, in_y
         self.optimizer.zero_grad()
-        # print(x.shape, y.shape)
-        ave_losses, kl = self.model.sample_elbo_m(inputs=x_scaled,
-                                                  labels=y,
-                                                  num_targets=self.num_targets,
-                                                  sample_nbr=samples,
-                                                  scaler=scaler)
 
-        overall_loss = self.BayesianWeightLinear(ave_losses)
-        overall_loss = overall_loss + kl
+        with autocast():
+            ave_losses, kl = self.model.sample_elbo_m(
+                inputs=x_scaled,
+                labels=y_scaled,
+                num_targets=self.num_targets,
+                sample_nbr=samples,
+                scaler=scaler
+            )
+            overall_loss = self.BayesianWeightLinear(ave_losses)
+            overall_loss = overall_loss + kl
+
+        # Gradient scaling calls
+        self.grad_scaler.scale(overall_loss).backward()
+        self.grad_scaler.step(self.optimizer)
+        self.grad_scaler.update()
 
         p_mu = self.BayesianWeightLinear.weight_mu
         p_rho = self.BayesianWeightLinear.weight_rho
 
-        overall_loss.backward()
-        self.optimizer.step()
         return overall_loss, ave_losses, p_mu, p_rho
 
     def test(self, in_test, samples=10, scaler=None, force_cpu=True):
         x_test = in_test
         if force_cpu:
-            x_test = x_test.transpose(1, 2).to(torch.device('cpu'))
+            self.model.to('cpu')
+            x_test = x_test.transpose(1, 2).cpu().detach()
         else:
-            x_test = in_test.transpose(1, 2).to(self.device)
+            x_test = x_test.transpose(1, 2).to(self.device)
         # batch_size = x_test.shape[0]
         # outputs = [np.zeros((0, batch_size, self.ahead))
         #            for _ in range(self.num_targets)]
@@ -368,8 +366,6 @@ class BSMDeTWrapper(nn.Module):
         x_scaled = x_test
         if scaler is not None:
             x_scaled = scaler.transform(x_scaled)
-        else:
-            x_scaled = MinMaxNorm().fit_transform(x_scaled)
 
         if force_cpu:
             return torch.stack(

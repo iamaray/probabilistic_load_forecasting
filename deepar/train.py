@@ -1,12 +1,12 @@
-from pytorchtools import EarlyStopping
+# from pytorchtools import EarlyStopping
 import matplotlib.pyplot as plt
 import argparse
 import logging
 import os
 import json
-
 import numpy as np
 import torch
+from torch.utils.data import DataLoader
 from torch import nn
 import torch.optim as optim
 from torch.utils.data.sampler import RandomSampler
@@ -14,6 +14,8 @@ from tqdm import tqdm
 
 import utils
 from .model import Net, loss_fn
+
+from metrics import compute_metrics
 # from evaluate import evaluate
 # from dataloader import *
 
@@ -116,3 +118,71 @@ class DeepARTrainer:
             if i == 0:
                 logger.info(f'train_loss: {loss}')
         return loss_epoch
+
+
+def grid_search_torch_model(
+        model_class: nn.Module,
+        trainer_class,
+        param_grid: dict,
+        training_args: dict,
+        train_loader,
+        test_loader,
+        criterion=None,
+        device='cpu',
+        savedir='modelsave/bmdet/',
+        savename='bmdet_best_model.pt',
+        train_norm=None,
+        test_norm=None):
+
+    param_combinations = list(itertools.product(*param_grid.values()))
+    best_model = None
+    best_params = None
+    best_acr_diff = float('inf')
+    best_trainer = None
+
+    for params in param_combinations:
+        print(len(param_combinations))
+        print(f"Evaluating params: {params}")
+
+        param_dict = dict(zip(param_grid.keys(), params))
+        # model = model_class(**param_dict).to(device)
+        model = model_class(**param_dict)
+        trainer = trainer_class(
+            model_wrapper=model, train_loader=train_loader, train_norm=train_norm)
+
+        trainer.train(**training_args)
+        # val_loss = trainer.test(test_loader=test_loader)
+
+        outs = []
+        # for (x, y) in test_loader:
+        #     out = model.test(in_test=x.to(device),
+        #                      samples=20, scaler=train_norm)
+        #     outs.append(out)
+        #     y = y.transpose(1, 2)
+        #     metrics.append(compute_metrics(out, y))
+        metrics = model.test(test_loader=test_loader, sampling=True)
+
+        # closeness to 0.8
+        acr = metrics['ACR']
+        acr_diff = np.abs(0.8 - acr)
+
+        print(f'Computed val loss of {
+              acr_diff}, comparing with {best_acr_diff}.')
+
+        if acr_diff < best_acr_diff:
+            best_acr_diff = acr_diff
+            best_model = model
+            best_params = param_dict
+            best_trainer = trainer
+
+    # torch.save(best_model.state_dict(), f'{savedir}/best_model_params.pth')
+    if best_trainer is not None:
+        best_trainer.save_model(savepath=savedir, savename=savename)
+    else:
+        print('Best model NOT saved :(')
+
+    # if isinstance(best_model, BSMDeTWrapper):
+    #     torch.save(model.model)
+
+    with open(f'{savedir}/best_hyperparams.json', 'w') as f:
+        json.dump(best_params, f)

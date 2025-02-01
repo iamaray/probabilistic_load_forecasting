@@ -3,7 +3,6 @@ from bayes_transformer.model import BSMDeTWrapper
 from bayes_transformer.trainer import BayesTrainer
 from grid_search import grid_search_torch_model
 import torch
-from preprocessing import MinMaxNorm
 
 
 if __name__ == "__main__":
@@ -18,7 +17,7 @@ if __name__ == "__main__":
         model_wrapper=model_wrapper,
         train_loader=train_loader,
         train_norm=train_norm,
-        test_norm=test_norm,
+        test_norm=train_norm,
         modelsave=True)
 
     trainer.train()
