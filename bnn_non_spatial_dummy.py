@@ -51,7 +51,7 @@ def main():
         'd_model': [16, 32],
         'encoder_layers': [2],
         'encoder_d_ff': [64],
-        'encoder_sublayers': [2, 3],
+        'encoder_sublayers': [2, 3, 4],
         'encoder_h': [8],
         'encoder_dropout': [0.1],
         'decoder_layers': [2],

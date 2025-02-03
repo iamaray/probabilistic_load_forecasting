@@ -15,6 +15,7 @@ import json
 import os
 from concurrent.futures import ProcessPoolExecutor
 import math
+import datetime
 
 
 class BayesTrainer:
@@ -59,6 +60,7 @@ class BayesTrainer:
         self.rho_list = np.zeros((epochs, num_targets))
 
         self.train_norm = train_norm
+        self.train_norm.set_device(str(device))
         # if train_norm is None:
         #     self.train_norm = MinMaxNorm()
         # if test_norm is None:
@@ -89,7 +91,7 @@ class BayesTrainer:
                 labels = labels.to(self.device).float()
 
                 overall_loss, losses, p_mu, p_rho = self.net.fit(
-                    in_x=inputs, in_y=labels, samples=ELBO_samples, scaler=self.train_norm)
+                    in_x=inputs, in_y=labels, samples=ELBO_samples, scaler=self.train_norm, device=self.device)
 
                 self.mu_list[epoch] += p_mu.cpu().detach().numpy()
                 self.rho_list[epoch] += p_rho.cpu().detach().numpy()
@@ -128,15 +130,13 @@ class BayesTrainer:
     def test(self, test_loader, samples=20):
         self.net.eval()
         metric_vals = []
+        with torch.no_grad():
+            for i, (x_test, y_test) in enumerate(test_loader):
+                outs = self.net.test(
+                    in_test=x_test, samples=samples, scaler=self.train_norm, force_cpu=True)
 
-        for i, (x_test, y_test) in enumerate(test_loader):
-            outs = self.net.test(
-                in_test=x_test, samples=samples, scaler=self.train_norm, force_cpu=True)
-
-            metric_val = compute_metrics(outs, y_test.transpose(1, 2))
-            metric_vals.append(metric_val)
-            if i == 5:
-                break
+                metric_val = compute_metrics(outs, y_test.transpose(1, 2))
+                metric_vals.append(metric_val)
 
         return {
             "ACR": np.mean([m['avg_coverage_rate'] for m in metric_vals]),
@@ -171,19 +171,43 @@ class BayesTrainer:
         np.save(savepath + "loss_train", np.asarray(self.loss_train))
 
 
-def train_on_gpu(model_class, trainer_class, train_loader, test_loader, train_norm, params, trainer_params, gpu_id):
+def train_on_gpu(model_class, trainer_class, train_loader, test_loader, train_norm,
+                 params, param_idx, trainer_params, gpu_id, progress_file_path):
+    """
+    Train one model on the specified GPU and log progress to progress_file_path.
+    """
     device = torch.device(f"cuda:{gpu_id}")
+
+    with open(progress_file_path, 'a') as f:
+        f.write(f"[{datetime.datetime.now(
+        )}] START TRAINING: Model-{param_idx} on GPU {gpu_id}, params={params}\n")
 
     model = model_class(**params)
     model.to(device)
 
     trainer = trainer_class(
-        model_wrapper=model, train_loader=train_loader, train_norm=train_norm, device=device)
+        model_wrapper=model,
+        train_loader=train_loader,
+        train_norm=train_norm,
+        device=device
+    )
 
+    # ---- Train ----
     trainer.train(**trainer_params)
-    # val_loss = trainer.test(test_loader=test_loader)
+    with open(progress_file_path, 'a') as f:
+        f.write(
+            f"[{datetime.datetime.now()}] FINISH TRAINING: Model-{param_idx}\n")
+
+    # ---- Test ----
+    with open(progress_file_path, 'a') as f:
+        f.write(f"[{datetime.datetime.now()}] START TESTING: Model-{param_idx}\n")
 
     metrics = trainer.test(test_loader=test_loader, samples=100)
+
+    with open(progress_file_path, 'a') as f:
+        f.write(
+            f"[{datetime.datetime.now()}] FINISH TESTING: Model-{param_idx}\n")
+
     trainer.net.to('cpu')
     for p in trainer.net.parameters():
         p.requires_grad = False
@@ -209,18 +233,19 @@ def grid_search_torch_model(
         max_workers=2):
 
     param_combinations = list(itertools.product(*param_grid.values()))
-    best_model = None
-    best_params = None
-    best_acr_diff = float('inf')
-    best_trainer = None
+    n_models = len(param_combinations)  # total number of models
+
+    os.makedirs(savedir, exist_ok=True)
+
+    progress_file_path = os.path.join(savedir, "progress_log.txt")
+    with open(progress_file_path, 'w') as pf:
+        pf.write(f"Total number of models to train: {n_models}\n")
 
     futures = []
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
-
         for i, params in enumerate(param_combinations):
             param_dict = dict(zip(param_grid.keys(), params))
             gpu_id = i % max_workers
-            # model = model_class(**param_dict).to(device)
 
             future = executor.submit(
                 train_on_gpu,
@@ -230,52 +255,44 @@ def grid_search_torch_model(
                 test_loader,
                 train_norm,
                 param_dict,
+                i,  # model index
                 training_args,
-                gpu_id
+                gpu_id,
+                progress_file_path
             )
             futures.append((params, future))
 
-            # for (x, y) in test_loader:
-            #     out = model.test(in_test=x.to(device),
-            #                      samples=20, scaler=train_norm)
-            #     outs.append(out)
-            #     y = y.transpose(1, 2)
-            #     metrics.append(compute_metrics(out, y))
-            # metrics = trainer.test(test_loader=test_loader, samples=100)
         results = []
         for params, f in futures:
-            res = f.result()
-            metrics, model_sd = res[0], res[1]
-            # trainer = f.result()
-            # metrics = trainer.test(test_loader=test_loader, samples=100)
-            results.append((params, metrics['ACR'], model_sd))
+            metrics, model_sd = f.result()
+            results.append((params, metrics, model_sd))
 
-        #     # closeness to 0.8
-        #     acr = metrics['ACR']
-        acr_diffs = np.array([math.fabs(r[1] - 0.8) for r in results])
-        best_diff_idx = np.argmin(acr_diffs)
+    # Pick best model based on difference from ACR=0.8
+    acr_diffs = np.array([math.fabs(r[1]['ACR'] - 0.8) for r in results])
+    best_diff_idx = np.argmin(acr_diffs)
 
-        best_weights = results[best_diff_idx][2]
-        best_params = results[best_diff_idx][0]
+    best_weights = results[best_diff_idx][2]
+    best_params = results[best_diff_idx][0]
+    best_metrics = results[best_diff_idx][1]
 
-        #     print(f'Computed val loss of {
-        #         acr_diff}, comparing with {best_acr_diff}.')
-
-        #     if acr_diff < best_acr_diff:
-        #         best_acr_diff = acr_diff
-        #         best_model = model
-        #         best_params = param_dict
-        #         best_trainer = trainer
-
-        # # torch.save(best_model.state_dict(), f'{savedir}/best_model_params.pth')
+    try:
         if best_weights is not None:
-            # best_trainer.save_model(savepath=savedir, savename=savename)
-            torch.save(best_weights, savedir + savename)
+            torch.save(best_weights, os.path.join(savedir, savename))
         else:
             print('Best model NOT saved :(')
+    except:
+        print('Best model NOT saved :(')
 
-        # if isinstance(best_model, BSMDeTWrapper):
-        #     torch.save(model.model)
+    try:
         if best_params is not None:
             with open(f'{savedir}/best_hyperparams.json', 'w') as f:
                 json.dump(best_params, f)
+    except:
+        print("Best hyperparams not saved.")
+
+    try:
+        if best_metrics is not None:
+            with open(f'{savedir}/best_test_metrics.json', 'w') as f:
+                json.dump(best_params, f)
+    except:
+        print("Best metrics not saved.")

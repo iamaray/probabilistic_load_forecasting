@@ -82,14 +82,17 @@ class DeepARTrainer:
         # idx ([batch_size]): one integer denoting the time series id;
         # labels_batch ([batch_size, train_window]): z_{1:T}.
 
-        for i, (train_batch, idx, labels_batch) in enumerate(tqdm(self.train_loader)):
+        for i, (train_batch, labels_batch) in enumerate(tqdm(self.train_loader)):
             self.optimizer.zero_grad()
             batch_size = train_batch.shape[0]
 
             train_batch = train_batch.permute(1, 0, 2).to(
-                torch.float32).to(self.device)  # not scaled
+                torch.float32).to(self.device)
+            labels_batch = labels_batch.squeeze(1)
+            print(labels_batch.shape)
             labels_batch = labels_batch.permute(1, 0).to(
-                torch.float32).to(self.device)  # not scaled
+                torch.float32).to(self.device)
+            idx = torch.zeros((batch_size)).int()
             idx = idx.unsqueeze(0).to(self.device)
 
             loss = torch.zeros(1, device=self.device)
@@ -102,7 +105,7 @@ class DeepARTrainer:
                 if t > 0 and torch.sum(zero_index) > 0:
                     train_batch[t, zero_index, 0] = mu[zero_index]
                 mu, sigma, hidden, cell = self.model(
-                    train_batch[t].unsqueeze_(0).clone(), idx, hidden, cell)
+                    x=train_batch[t].unsqueeze_(0).clone(), idx=idx, hidden=hidden, cell=cell)
                 loss += self.loss_fn(mu, sigma, labels_batch[t])
 
             loss.backward()

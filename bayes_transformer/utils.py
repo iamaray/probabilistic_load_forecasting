@@ -22,13 +22,13 @@ class taskbalance(nn.Module):
         self.weight_mu = nn.Parameter(w_mu)
         self.weight_rho = nn.Parameter(w_rho)
 
-        self.device = torch.device(
-            "cuda:0" if torch.cuda.is_available() else "cpu")
-
-    def forward(self, losses):
+    def forward(self, losses, device_str='cpu'):
+        self.device = torch.device(device_str)
         stds = torch.stack([torch.randn(1).to(self.device)
                             for _ in range(self.num)])
 
+        self.weight_mu = self.weight_mu.to(self.device)
+        self.weight_rho = self.weight_rho.to(self.device)
         W = stds * self.weight_rho + self.weight_mu
 
         loss = torch.tensor(0.0).to(self.device)

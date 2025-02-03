@@ -29,6 +29,14 @@ class MinMaxNorm:
     def reverse(self, transformed: torch.Tensor):
         return ((transformed * (self.max_val - self.min_val)) + self.min_val).to(self.device)
 
+    def set_device(self, device='cuda'):
+        if device == 'cpu':
+            self.max_val = self.max_val.cpu().detach()
+            self.min_val = self.min_val.cpu().detach()
+        else:
+            self.max_val = self.max_val.to(device)
+            self.min_val = self.min_val.to(device)
+
 
 class StandardScaleNorm:
     def __init__(self):
@@ -48,6 +56,14 @@ class StandardScaleNorm:
 
     def reverse(self, transformed: torch.Tensor):
         return (transformed * self.std) + self.mean
+
+    def set_device(self, device='cuda'):
+        if device == 'cpu':
+            self.mean = self.mean.cpu().detach()
+            self.std = self.std.cpu().detach()
+        else:
+            self.mean = self.mean.to(device)
+            self.std = self.std.to(device)
 
 
 def readtoFiltered(csv_path, variates=[]):

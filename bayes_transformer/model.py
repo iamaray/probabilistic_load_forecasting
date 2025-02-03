@@ -308,12 +308,14 @@ class BSMDeTWrapper(nn.Module):
                                            {'params': self.BayesianWeightLinear.parameters()}],
                                           lr=lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0)
 
-    def fit(self, in_x, in_y, samples=1, scaler=None):
+    def fit(self, in_x, in_y, samples=1, scaler=None, device=None):
         x, y = in_x.transpose(1, 2), in_y.transpose(1, 2)
 
         x_scaled = x
         y_scaled = y
         if scaler is not None:
+            if device is not None:
+                scaler.set_device(str(device))
             x_scaled = scaler.transform(x)
             y_scaled = scaler.transform(y)
 
@@ -327,7 +329,8 @@ class BSMDeTWrapper(nn.Module):
                 sample_nbr=samples,
                 scaler=scaler
             )
-            overall_loss = self.BayesianWeightLinear(ave_losses)
+            overall_loss = self.BayesianWeightLinear(
+                ave_losses, device_str=str(device))
             overall_loss = overall_loss + kl
 
         # Gradient scaling calls
@@ -345,6 +348,8 @@ class BSMDeTWrapper(nn.Module):
         if force_cpu:
             self.model.to('cpu')
             x_test = x_test.transpose(1, 2).cpu().detach()
+            if scaler is not None:
+                scaler.set_device('cpu')
         else:
             x_test = x_test.transpose(1, 2).to(self.device)
         # batch_size = x_test.shape[0]
@@ -366,17 +371,26 @@ class BSMDeTWrapper(nn.Module):
         x_scaled = x_test
         if scaler is not None:
             x_scaled = scaler.transform(x_scaled)
-
-        if force_cpu:
-            return torch.stack(
-                [scaler.reverse(self.model(x_scaled))
-                 for _ in range(samples)],
-                dim=-1)
-        else:
-            return torch.stack(
-                [scaler.reverse(self.model(x_scaled)).cpu().detach()
-                 for _ in range(samples)],
-                dim=-1)
+        with torch.no_grad():
+            if force_cpu:
+                if scaler is not None:
+                    return torch.stack(
+                        [scaler.reverse(self.model(x_scaled))
+                         for _ in range(samples)],
+                        dim=-1)
+                else:
+                    return torch.stack(
+                        [self.model(x_scaled) for _ in range(samples)], dim=-1)
+            else:
+                if scaler is not None:
+                    return torch.stack(
+                        [scaler.reverse(self.model(x_scaled)).cpu().detach()
+                         for _ in range(samples)],
+                        dim=-1)
+                else:
+                    return torch.stack(
+                        [self.model(x_scaled).cpu().detach()
+                         for _ in range(samples)], dim=-1)
 
     def get_nb_parameters(self):
         return np.sum(p.numel() for p in self.model.parameters())
