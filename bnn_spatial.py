@@ -4,6 +4,7 @@ from bayes_transformer.trainer import BayesTrainer
 from bayes_transformer.trainer import grid_search_torch_model
 import torch
 from preprocessing import MinMaxNorm
+import torch.multiprocessing as mp
 
 
 def main():

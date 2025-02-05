@@ -10,18 +10,22 @@ import torch.multiprocessing as mp
 
 
 def main():
-    df, train_loader, test_loader, train_norm, test_norm = preprocess(
+    df, train_loader, test_loader, train_norm, date_to_index, test_start_idx = preprocess(
         csv_path='data/ercot_data_2025_Jan.csv',
         net_load_input=True,
         variates=['marketday', 'ACTUAL_ERC_Load',
-                  'ACTUAL_ERC_Solar', 'ACTUAL_ERC_Wind', 'hourending'])
+                  'ACTUAL_ERC_Solar', 'ACTUAL_ERC_Wind', 'hourending'],
+        device='cuda')
 
     # print(type(test_norm), type(train_norm))
     # print(test_norm.min_val, train_norm.min_val)
     # print(test_norm.max_val, train_norm.max_val)
 
-    # for x, y in train_loader:
-    #     print(x.shape, y.shape)
+    for x, y in train_loader:
+        print(x.shape, y.shape)
+
+    for x, y in test_loader:
+        print(x.shape, y.shape)
 
     # model_wrapper = BSMDeTWrapper(cuda=False, num_targets=1, num_aux_feats=3)
     # trainer = BayesTrainer(model_wrapper=model_wrapper,
@@ -29,18 +33,18 @@ def main():
 
     param_grid = {
         'num_targets': [1],
-        'num_aux_feats': [1],
-        'd_model': [32],
+        'num_aux_feats': [2],
+        'd_model': [16, 32, 64],
         'encoder_layers': [2, 3],
-        'encoder_d_ff': [128],
-        'encoder_sublayers': [3],
-        'encoder_h': [8],
+        'encoder_d_ff': [128, 256],
+        'encoder_sublayers': [2, 3, 4],
+        'encoder_h': [8, 16],
         'encoder_dropout': [0.1],
         'decoder_layers': [2, 3],
         'decoder_dropout': [0.1],
-        'decoder_h': [8],
-        'decoder_d_ff': [128],
-        'decoder_sublayers': [4]
+        'decoder_h': [8, 16],
+        'decoder_d_ff': [128, 256],
+        'decoder_sublayers': [2, 3, 4]
     }
 
     # param_grid = {
