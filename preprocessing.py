@@ -289,4 +289,4 @@ def preprocess(
     testset = TensorDataset(x_test, y_test)
     test_loader = DataLoader(testset, batch_size=64, shuffle=False)
 
-    return df, train_loader, test_loader, train_norm, test_norm
+    return df, train_loader, test_loader, train_norm, test_norm, date_to_index, test_start_idx

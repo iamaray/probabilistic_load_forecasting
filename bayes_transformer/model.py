@@ -11,7 +11,6 @@ from .utils import variational_estimator
 from utils import model_saver
 from torch.cuda.amp import autocast, GradScaler
 
-
 from preprocessing import MinMaxNorm, StandardScaleNorm
 
 
@@ -33,9 +32,10 @@ class MultiHeadedAttention(nn.Module):
 
     def forward(self, query, key, value):
         nbatches = query.size(0)
-        query, key, value = \
-            [l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
-             for l, x in zip(self.linears, (query, key, value))]
+        query, key, value = [
+            l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
+            for l, x in zip(self.linears, (query, key, value))
+        ]
 
         x, self.attn = attention(query, key, value, dropout=self.dropout)
         x = x.transpose(1, 2).contiguous().view(
@@ -147,8 +147,7 @@ class Decoder(nn.Module):
         self.layers = clones(layer, num_layers)
         self.norm = LayerNorm(layer.size)
         self.outputLinear = BayesianLinear(d_model, feats)
-        self.outputLinear1 = BayesianLinear(
-            window_length, window_length)
+        self.outputLinear1 = BayesianLinear(window_length, window_length)
         self.outputLinear2 = BayesianLinear(window_length, ahead)
 
     def forward(self, memory, decoderINPUT):
@@ -185,8 +184,8 @@ class BayesianMDeT(nn.Module):
             decoder_dropout=0.1,
             decoder_h=8,
             decoder_d_ff=128,
-            decoder_sublayers=3):
-
+            decoder_sublayers=3
+    ):
         super(BayesianMDeT, self).__init__()
         self.name = name
         self.num_targets = num_targets
@@ -207,15 +206,23 @@ class BayesianMDeT(nn.Module):
 
         self.decoders = nn.ModuleList()
         for _ in range(num_targets):
-            self.decoders.append(Decoder(num_layers=decoder_layers, d_model=d_model, ahead=ahead, num_targets=num_targets,
-                                         num_aux_feats=num_aux_feats, window_length=window_len, dropout=decoder_dropout, h=decoder_h, N=decoder_sublayers, d_ff=decoder_d_ff))
+            self.decoders.append(
+                Decoder(num_layers=decoder_layers,
+                        d_model=d_model,
+                        ahead=ahead,
+                        num_targets=num_targets,
+                        num_aux_feats=num_aux_feats,
+                        window_length=window_len,
+                        dropout=decoder_dropout,
+                        h=decoder_h,
+                        N=decoder_sublayers,
+                        d_ff=decoder_d_ff)
+            )
 
     def forward(self, x: torch.Tensor):
-        # x = input.transpose(1, 2)
-        # x = input
-        # x: input data. shape (batch, window_len, num_targets + num_aux_feats)
+        # x shape: (batch, window_len, num_targets + num_aux_feats)
         encoder_output = self.encoder(self.encoderLinear(x))
-        # aux: Auxiliary information. shape (batch, window_len, num_aux_feats)
+        # aux: shape (batch, window_len, num_aux_feats)
         aux = x[:, :, self.num_targets:]
 
         inputs = [
@@ -223,8 +230,11 @@ class BayesianMDeT(nn.Module):
             for i in range(self.num_targets)
         ]
 
-        outputs = [self.decoders[i](encoder_output, self.decoder_linear_layers[i](
-            inputs[i])) for i in range(self.num_targets)]
+        outputs = [
+            self.decoders[i](
+                encoder_output, self.decoder_linear_layers[i](inputs[i]))
+            for i in range(self.num_targets)
+        ]
         outputs = torch.cat(outputs, dim=-1)
 
         if len(outputs.shape) == 2:
@@ -233,30 +243,32 @@ class BayesianMDeT(nn.Module):
 
 
 class BSMDeTWrapper(nn.Module):
-    def __init__(self,
-                 ahead=24,
-                 num_targets=1,
-                 num_aux_feats=0,
-                 window_len=168,
-                 name="BSMDeT",
-                 d_model=32,
-                 encoder_layers=2,
-                 encoder_d_ff=128,
-                 encoder_sublayers=2,
-                 encoder_h=8,
-                 encoder_dropout=0.1,
-                 decoder_layers=2,
-                 decoder_dropout=0.1,
-                 decoder_h=8,
-                 decoder_d_ff=128,
-                 decoder_sublayers=3,
-                 lr=0.001):
+    def __init__(
+            self,
+            ahead=24,
+            num_targets=1,
+            num_aux_feats=0,
+            window_len=168,
+            name="BSMDeT",
+            d_model=32,
+            encoder_layers=2,
+            encoder_d_ff=128,
+            encoder_sublayers=2,
+            encoder_h=8,
+            encoder_dropout=0.1,
+            decoder_layers=2,
+            decoder_dropout=0.1,
+            decoder_h=8,
+            decoder_d_ff=128,
+            decoder_sublayers=3,
+            lr=0.001,
+            pretrained_weights_path=None   # <--- Added parameter
+    ):
         super(BSMDeTWrapper, self).__init__()
         self.num_targets = num_targets
         self.ahead = ahead
         self.num_aux_feats = num_aux_feats
         self.window_len = window_len
-        # self.cuda = cuda
         self.name = name
         self.d_model = d_model
         self.encoder_layers = encoder_layers
@@ -270,14 +282,12 @@ class BSMDeTWrapper(nn.Module):
         self.decoder_d_ff = decoder_d_ff
         self.decoder_sublayers = decoder_sublayers
 
-        self.create(lr=lr)
-        # self.cuda = cuda
+        # Create the model and attempt loading pre-trained weights if provided
+        self.create(lr=lr, pretrained_weights_path=pretrained_weights_path)
+
         self.grad_scaler = GradScaler()
 
-        # self.train_scaler = train_scaler if train_scaler is not None else MinMaxNorm()
-        # self.test_scaler = test_scaler if test_scaler is not None else MinMaxNorm()
-
-    def create(self, lr=0.001):
+    def create(self, lr=0.001, pretrained_weights_path=None):
         self.model = BayesianMDeT(
             ahead=self.ahead,
             num_targets=self.num_targets,
@@ -294,19 +304,37 @@ class BSMDeTWrapper(nn.Module):
             decoder_dropout=self.decoder_dropout,
             decoder_h=self.decoder_h,
             decoder_d_ff=self.decoder_d_ff,
-            decoder_sublayers=self.decoder_sublayers)
+            decoder_sublayers=self.decoder_sublayers
+        )
+
+        # Attempt to load pre-trained weights if path is provided
+        if pretrained_weights_path is not None:
+            state_dict = torch.load(
+                pretrained_weights_path, map_location='cpu')
+            self.model.load_state_dict(state_dict)
+            print(
+                f"Pre-trained weights loaded from: {pretrained_weights_path}")
 
         self.BayesianWeightLinear = taskbalance(num=self.num_targets)
 
-        # if self.cuda:
-        #     self.model.cuda()
-        #     self.BayesianWeightLinear.cuda()
-
         print('    Total params: %.2fM' %
               (self.get_nb_parameters() / 1000000.0))
-        self.optimizer = torch.optim.Adam([{'params': self.model.parameters()},
-                                           {'params': self.BayesianWeightLinear.parameters()}],
-                                          lr=lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0)
+
+        self.optimizer = torch.optim.Adam(
+            [
+                {'params': self.model.parameters()},
+                {'params': self.BayesianWeightLinear.parameters()}
+            ],
+            lr=lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0
+        )
+
+    def load_pretrained(self, path):
+        """
+        Optional convenience method to load pre-trained weights at any time.
+        """
+        state_dict = torch.load(path, map_location='cpu')
+        self.model.load_state_dict(state_dict)
+        print(f"Pre-trained weights loaded from: {path}")
 
     def fit(self, in_x, in_y, samples=1, scaler=None, device=None):
         x, y = in_x.transpose(1, 2), in_y.transpose(1, 2)
@@ -320,7 +348,6 @@ class BSMDeTWrapper(nn.Module):
             y_scaled = scaler.transform(y)
 
         self.optimizer.zero_grad()
-
         with autocast():
             ave_losses, kl = self.model.sample_elbo_m(
                 inputs=x_scaled,
@@ -333,7 +360,6 @@ class BSMDeTWrapper(nn.Module):
                 ave_losses, device_str=str(device))
             overall_loss = overall_loss + kl
 
-        # Gradient scaling calls
         self.grad_scaler.scale(overall_loss).backward()
         self.grad_scaler.step(self.optimizer)
         self.grad_scaler.update()
@@ -352,45 +378,36 @@ class BSMDeTWrapper(nn.Module):
                 scaler.set_device('cpu')
         else:
             x_test = x_test.transpose(1, 2).to(self.device)
-        # batch_size = x_test.shape[0]
-        # outputs = [np.zeros((0, batch_size, self.ahead))
-        #            for _ in range(self.num_targets)]
 
-        # for _ in range(samples):
-        #     model_outputs = self.model(x_test)
-
-        # for i, output in enumerate(model_outputs):
-        #     # output_np = torch.permute(output.cpu().detach(),
-        #     #                           (-1, output.shape[0], output.shape[1]))
-        #     # outputs[i] = torch.cat(
-        #     #     [outputs[i], output_np], axis=0).unsqueeze(-1)
-        #     outputs[i] = torch.cat(
-        #         [outputs[i]], axis=0).unsqueeze(-1)
-
-        # x_in = self.test_scaler.transform(x_test)
         x_scaled = x_test
         if scaler is not None:
             x_scaled = scaler.transform(x_scaled)
+
         with torch.no_grad():
             if force_cpu:
                 if scaler is not None:
                     return torch.stack(
                         [scaler.reverse(self.model(x_scaled))
                          for _ in range(samples)],
-                        dim=-1)
+                        dim=-1
+                    )
                 else:
                     return torch.stack(
-                        [self.model(x_scaled) for _ in range(samples)], dim=-1)
+                        [self.model(x_scaled) for _ in range(samples)], dim=-1
+                    )
             else:
                 if scaler is not None:
                     return torch.stack(
                         [scaler.reverse(self.model(x_scaled)).cpu().detach()
                          for _ in range(samples)],
-                        dim=-1)
+                        dim=-1
+                    )
                 else:
                     return torch.stack(
                         [self.model(x_scaled).cpu().detach()
-                         for _ in range(samples)], dim=-1)
+                         for _ in range(samples)],
+                        dim=-1
+                    )
 
     def get_nb_parameters(self):
         return np.sum(p.numel() for p in self.model.parameters())

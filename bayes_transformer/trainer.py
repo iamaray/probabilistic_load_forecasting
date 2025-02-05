@@ -293,6 +293,6 @@ def grid_search_torch_model(
     try:
         if best_metrics is not None:
             with open(f'{savedir}/best_test_metrics.json', 'w') as f:
-                json.dump(best_params, f)
+                json.dump(best_metrics, f)
     except:
         print("Best metrics not saved.")
