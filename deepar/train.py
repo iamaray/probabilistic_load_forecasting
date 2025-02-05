@@ -169,8 +169,7 @@ def grid_search_torch_model(
         acr = metrics['ACR']
         acr_diff = np.abs(0.8 - acr)
 
-        print(f'Computed val loss of {
-              acr_diff}, comparing with {best_acr_diff}.')
+        print(f'Computed val loss of {acr_diff}, comparing with {best_acr_diff}.')
 
         if acr_diff < best_acr_diff:
             best_acr_diff = acr_diff

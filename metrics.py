@@ -24,8 +24,7 @@ def compute_metrics(forecasts, ground_truth, alpha=0.2):
         ground_truth = ground_truth.detach().cpu().numpy()
 
     if forecasts.shape[:-1] != ground_truth.shape:
-        raise ValueError(f"Forecasts shape {
-                         forecasts.shape[:-1]} and ground truth shape {ground_truth.shape} are not aligned.")
+        raise ValueError(f"Forecasts shape {forecasts.shape[:-1]} and ground truth shape {ground_truth.shape} are not aligned.")
 
     lower_bound = np.percentile(forecasts, 100 * (alpha / 2), axis=-1)
     upper_bound = np.percentile(forecasts, 100 * (1 - alpha / 2), axis=-1)
