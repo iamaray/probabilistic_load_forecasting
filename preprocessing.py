@@ -131,7 +131,7 @@ def formPairs(
         x_tensor: torch.Tensor,
         y_tensor: torch.Tensor,
         x_start_hour: int = 9,
-        x_y_gap: int = 24,
+        x_y_gap: int = 15,
         x_window: int = 168,
         y_window: int = 24,
         step_size: int = 24):
