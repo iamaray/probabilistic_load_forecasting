@@ -34,17 +34,17 @@ def main():
     param_grid = {
         'num_targets': [1],
         'num_aux_feats': [2],
-        'd_model': [16, 32, 64],
+        'd_model': [32],
         'encoder_layers': [2, 3],
-        'encoder_d_ff': [128, 256],
-        'encoder_sublayers': [2, 3, 4],
-        'encoder_h': [8, 16],
+        'encoder_d_ff': [128],
+        'encoder_sublayers': [2, 3],
+        'encoder_h': [8],
         'encoder_dropout': [0.1],
         'decoder_layers': [2, 3],
         'decoder_dropout': [0.1],
-        'decoder_h': [8, 16],
-        'decoder_d_ff': [128, 256],
-        'decoder_sublayers': [2, 3, 4]
+        'decoder_h': [8],
+        'decoder_d_ff': [128],
+        'decoder_sublayers': [2, 3]
     }
 
     # param_grid = {
