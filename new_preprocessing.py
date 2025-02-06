@@ -95,34 +95,44 @@ def shift_forecast_columns(df, forecast_cols, shift_hours=-24):
     return df_shifted
 
 
-def standardize_df(df, train_start, train_end, columns):
+def standardize_df(df, train_start, train_end, val_start, val_end, columns):
     """
     Standardize the given columns of df based on mean & std from the training period only.
 
     Args:
-        df (pd.DataFrame): Your full dataset with a DateTimeIndex.
-        train_start (str or pd.Timestamp): Start date for training data.
-        train_end (str or pd.Timestamp): End date for training data (exclusive or inclusive depending on your preference).
+        df (pd.DataFrame): The full dataset with a DateTimeIndex.
+        train_start (pd.Timestamp): Start date for training data.
+        train_end (pd.Timestamp): End date for training data.
+        val_start (pd.Timestamp): Start date for validation data.
+        val_end (pd.Timestamp): End date for validation data.
         columns (list of str): The columns to be standardized.
 
     Returns:
-        (df_scaled, means, stds)
-            - df_scaled: DataFrame with the specified columns standardized.
-            - means: The mean values (Series) for each column, computed over training period.
-            - stds: The std values (Series) for each column, computed over training period.
+        tuple:
+            - df_scaled (pd.DataFrame): The standardized DataFrame.
+            - means (pd.Series): Mean values computed over the training period.
+            - stds (pd.Series): Standard deviation values computed over the training period.
+            - df_train (pd.DataFrame): Training data.
+            - df_val (pd.DataFrame): Validation data.
+            - df_test (pd.DataFrame): Test data.
     """
-
-    # 1) Slice the training period
+    # 1) Extract the training set
     df_train = df.loc[train_start:train_end, columns].copy()
-    # 2) Compute mean/std
-    means = df_train.mean()
-    stds = df_train.std().replace(0, 1e-8)  # avoid div-by-zero if needed
 
-    # 3) Apply to the entire DataFrame
+    # 2) Compute mean & std based on training set only
+    means = df_train.mean()
+    stds = df_train.std().replace(0, 1e-8)  # Avoid division by zero
+
+    # 3) Standardize the entire dataset using training stats
     df_scaled = df.copy()
     df_scaled[columns] = (df_scaled[columns] - means) / stds
 
-    return df_scaled, means, stds
+    # 4) Extract validation & test sets
+    df_val = df_scaled.loc[val_start:val_end]
+    df_test = df_scaled.loc[val_end:]  # Everything after val_end
+
+    return df_scaled, means, stds, df_train, df_val, df_test
+
 
 def build_day_ahead_samples_with_mask(
     df,
