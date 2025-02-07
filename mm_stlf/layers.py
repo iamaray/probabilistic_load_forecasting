@@ -54,7 +54,7 @@ class AdaptiveAvgPool1D(nn.Module):
         self.pool = nn.AdaptiveAvgPool1d(output_size)  # Pooling over the sequence length dimension
 
     def forward(self, x):
-        print(f"[AdaptiveAvgPool1D] Before Pooling: {x.shape}")  # Debug
+        # print(f"[AdaptiveAvgPool1D] Before Pooling: {x.shape}")  # Debug
 
         # x: (batch_size, seq_length, d_emb) -> Permute to (batch_size, d_emb, seq_length)
         x = x.permute(0, 2, 1)  # Move sequence length (L) to the last dimension
@@ -65,7 +65,7 @@ class AdaptiveAvgPool1D(nn.Module):
         # Bring back to (batch_size, new_seq_length, d_emb) -> Should now be (batch, 24, d_emb)
         x = x.permute(0, 2, 1)
 
-        print(f"[AdaptiveAvgPool1D] After Pooling: {x.shape}")  # Debug
+        # print(f"[AdaptiveAvgPool1D] After Pooling: {x.shape}")  # Debug
         return x
 
 

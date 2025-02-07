@@ -17,17 +17,17 @@ class MM_STLF(nn.Module):
         self.head = nn.Linear(7 * d_emb, 24)
 
     def forward(self, x):
-        print(f"[MM_STLF] Input shape: {x.shape}")  # Debug
+        # print(f"[MM_STLF] Input shape: {x.shape}")  # Debug
         x = self.embedding(x)
-        print(f"[MM_STLF] After Embedding: {x.shape}")  # Debug
+        # print(f"[MM_STLF] After Embedding: {x.shape}")  # Debug
         x = self.pos_encoding(x)
-        print(f"[MM_STLF] After Positional Encoding: {x.shape}")  # Debug
+        # print(f"[MM_STLF] After Positional Encoding: {x.shape}")  # Debug
         x = self.mixers(x)
-        print(f"[MM_STLF] After Mixer Layers: {x.shape}")  # Debug
+        # print(f"[MM_STLF] After Mixer Layers: {x.shape}")  # Debug
         x = self.pooling(x)
-        print(f"[MM_STLF] After AdaptiveAvgPool1D Pooling: {x.shape}")  # Debug
+        # print(f"[MM_STLF] After AdaptiveAvgPool1D Pooling: {x.shape}")  # Debug
         x = self.flatten(x)
-        print(f"[MM_STLF] After Flattening: {x.shape}")  # Debug
+        # print(f"[MM_STLF] After Flattening: {x.shape}")  # Debug
         x = self.head(x)
-        print(f"[MM_STLF] Final Output shape: {x.shape}")  # Debug
+        # print(f"[MM_STLF] Final Output shape: {x.shape}")  # Debug
         return x

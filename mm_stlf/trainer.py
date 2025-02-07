@@ -96,7 +96,6 @@ class Trainer:
                 running_loss += loss.item()
 
         avg_loss = running_loss / len(data_loader)
-        print(f"Validation Loss: {avg_loss:.4f}")
         return avg_loss
 
     def test(self):
@@ -105,7 +104,7 @@ class Trainer:
         """
         print("\nEvaluating on Test Set:")
         test_loss = self.evaluate(self.test_loader)
-        print(f"Final Test Loss: {test_loss:.4f}")
+        print(f"Final Test Loss: {test_loss:.7f}")
 
     def save_model(self, save_path):
         """Saves the model state dictionary."""

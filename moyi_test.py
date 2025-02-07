@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 # Import model and trainer
 from mm_stlf.models import MM_STLF
 from mm_stlf.trainer import Trainer
-from new_preprocessing import load_data, shift_forecast_columns, build_day_ahead_samples_with_mask, standardize_df
+from new_preprocessing import load_data, shift_forecast_columns, new_formPairs, standardize_df
 
 
 
@@ -41,7 +41,7 @@ if __name__ == "__main__":
 	print(df_scaled[actual_cols + forecast_cols].head())
 
 	# 4a) TRAIN: build samples from [train_start_date, train_end_date)
-	samples_X_train, samples_y_train = build_day_ahead_samples_with_mask(
+	samples_X_train, samples_y_train = new_formPairs(
 		df=df_scaled,
 		start_date=train_start_date,
 		end_date=train_end_date,
@@ -53,7 +53,7 @@ if __name__ == "__main__":
 	)
 
 	# 4b) VALIDATION: build samples from [val_start_date, val_end_date)
-	samples_X_val, samples_y_val = build_day_ahead_samples_with_mask(
+	samples_X_val, samples_y_val = new_formPairs(
 		df=df_scaled,
 		start_date=val_start_date,
 		end_date=val_end_date,
@@ -65,7 +65,7 @@ if __name__ == "__main__":
 	)
 
 	# 4c) TEST: build samples from [test_start_date, test_end_date)
-	samples_X_test, samples_y_test = build_day_ahead_samples_with_mask(
+	samples_X_test, samples_y_test = new_formPairs(
 		df=df_scaled,
 		start_date=test_start_date,
 		end_date=test_end_date,
@@ -119,10 +119,10 @@ if __name__ == "__main__":
 		num_features=len(actual_cols + forecast_cols),  # D: total number of input features
 		d_emb=64,  # d_emb: embedding dimension
 		num_mixers=4,  # Number of mixer layers
-		dropout_rate=0.1  # Dropout rate
+		dropout_rate=0.2  # Dropout rate
 	).to(device)
 	criterion = nn.MSELoss()  # Mean Squared Error loss
-	optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+	optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
 	# 8) Initialize and Train Model
 	trainer = Trainer(model, train_loader, val_loader, test_loader, criterion, optimizer, device)
