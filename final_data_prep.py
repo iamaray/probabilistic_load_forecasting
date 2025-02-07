@@ -125,6 +125,8 @@ if __name__ == "__main__":
 	X_test_tensor = torch.stack(samples_X_test, dim=0)
 	y_test_tensor = torch.stack(samples_y_test, dim=0)
 
+	print(X_train_tensor[1].shape)
+
 
 	train_dataset = torch.utils.data.TensorDataset(X_train_tensor, y_train_tensor)
 	train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True)
@@ -141,10 +143,16 @@ if __name__ == "__main__":
 
 
 	"""Use the following code to laod the dataloader"""
-	# Load the saved datasets
-	# train_dataset = torch.load('./data/train_dataset.pt')
-	# val_dataset = torch.load('./data/val_dataset.pt')
-	# test_dataset = torch.load('./data/test_dataset.pt')
+	# # Load the saved datasets
+	# actual_cols = ["ACTUAL_NetLoad", "ACTUAL_ERC_Load", "ACTUAL_ERC_Wind", "ACTUAL_ERC_Solar"]
+	# forecast_cols = ["NetLoad", "ERC_Load", "ERC_Wind", "ERC_Solar"]
+	# error_cols = ["NetLoad_Error", "Load_Error", "Wind_Error", "Solar_Error"]
+	# aux_cols = ["HoD", "DoW", "MoY"]
+	#
+	# # Load the saved datasets
+	# train_dataset = torch.load('./data/train_dataset.pt', weights_only=False)
+	# val_dataset = torch.load('./data/val_dataset.pt', weights_only=False)
+	# test_dataset = torch.load('./data/test_dataset.pt', weights_only=False)
 	#
 	# # Recreate the DataLoaders
 	# train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True)

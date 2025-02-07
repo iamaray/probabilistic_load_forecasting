@@ -238,92 +238,71 @@ def standardize_df(df, train_start, train_end, val_start, val_end, columns):
 #     return samples_X, samples_y
 
 
+import pandas as pd
+import torch
+
+import pandas as pd
+import torch
 
 
 def new_formPairs(
-    df,
-    start_date,
-    end_date,
-    lookback_hours=168,
-    forecast_hours=24,
-    forecast_deadline_hour=9,
-    actual_cols=["ACTUAL_NetLoad", "ACTUAL_ERC_Load", "ACTUAL_ERC_Wind", "ACTUAL_ERC_Solar"],
-    forecast_cols=["NetLoad", "ERC_Load", "ERC_Wind", "ERC_Solar"],
-    error_cols=["NetLoad_Error", "Load_Error", "Wind_Error", "Solar_Error"],
-    aux_cols=["HoD", "DoW", "MoY"],
-    step_size=24
+        df,
+        start_date,
+        end_date,
+        lookback_hours=168,
+        forecast_hours=24,
+        forecast_deadline_hour=9,
+        actual_cols=["ACTUAL_NetLoad", "ACTUAL_ERC_Load", "ACTUAL_ERC_Wind", "ACTUAL_ERC_Solar"],
+        forecast_cols=["NetLoad", "ERC_Load", "ERC_Wind", "ERC_Solar"],
+        error_cols=["NetLoad_Error", "Load_Error", "Wind_Error", "Solar_Error"],
+        aux_cols=["HoD", "DoW", "MoY"],
+        step_size=24
 ):
     """
-    Builds one (X, y) sample per forecast day D in [start_date, end_date).
+    Builds (X, y) samples for each forecast day D in [start_date, end_date).
 
-    - X is a concatenation of:
-        1. `actual_cols + error_cols + aux_cols`: Extracted from [D-1 09:00 to D-1 09:00 - 168h]
-        2. `forecast_cols`: Extracted from [D-1 23:00 to D-1 23:00 - 168h]
-
+    - X includes:
+        1. actual_cols + error_cols + aux_cols: [D-1 09:00 to D-1 09:00 - 168h]
+        2. forecast_cols: [D-1 23:00 to D-1 23:00 - 168h]
     - y is the next 24-hour actual data [D, D+24).
-
-    Args:
-        df (pd.DataFrame): DataFrame with a DateTimeIndex at hourly resolution.
-        start_date (str or pd.Timestamp): Start date for day-by-day sampling.
-        end_date (str or pd.Timestamp): End date for day-by-day sampling (exclusive).
-        lookback_hours (int): Number of hours to look back for X (default 168 for 7 days).
-        forecast_hours (int): Number of hours to predict for y (default 24).
-        actual_cols (list of str): Columns containing actual measurements.
-        forecast_cols (list of str): Columns containing forecast or other features.
-        error_cols (list of str): Additional error-related features (optional).
-        aux_cols (list of str): Auxiliary feature columns (optional).
-        step_size (int): Number of hours to shift for each sample (default 24).
-
-    Returns:
-        samples_X, samples_y:
-            - samples_X: list of torch.FloatTensor, each of shape (168, total_features).
-            - samples_y: list of torch.FloatTensor, each of shape (forecast_hours,).
     """
-
-    # Combine actual, error, and auxiliary columns
     if error_cols is None:
         error_cols = []
     if aux_cols is None:
         aux_cols = []
 
     selected_actual_cols = actual_cols + error_cols + aux_cols
-
     samples_X, samples_y = [], []
+
     current_day = pd.to_datetime(start_date)
     final_day = pd.to_datetime(end_date)
 
     while current_day < final_day:
-        # Define the day for which we are making predictions
         forecast_start = current_day
         forecast_end = current_day + pd.Timedelta(hours=forecast_hours)
-
-        # Define y = actual future data
         df_future = df.loc[forecast_start:forecast_end - pd.Timedelta(hours=1)]
-        y_df = df_future["ACTUAL_NetLoad"].copy()
+        y_tensor = torch.tensor(df_future["ACTUAL_NetLoad"].values, dtype=torch.float32)
 
-        # Define lookback for actual/error/auxiliary features: [D-1 09:00 to (D-1 09:00 - 168h)]
-        actual_lookback_end = (current_day - pd.Timedelta(hours=24-forecast_deadline_hour)).replace(minute=0, second=0)
-        actual_lookback_start = actual_lookback_end - pd.Timedelta(hours=lookback_hours-1)
-
+        actual_lookback_end = (current_day - pd.Timedelta(hours=24 - forecast_deadline_hour))
+        actual_lookback_start = actual_lookback_end - pd.Timedelta(hours=lookback_hours) + pd.Timedelta(hours=1)
         df_actual = df.loc[actual_lookback_start:actual_lookback_end, selected_actual_cols]
 
-        # Define lookback for forecast features: [D-1 23:00 to (D-1 23:00 - 168h)]
-        forecast_lookback_end = (current_day - pd.Timedelta(hours=1)).replace(minute=0, second=0)
-        forecast_lookback_start = forecast_lookback_end - pd.Timedelta(hours=lookback_hours-1)
-
+        forecast_lookback_end = (current_day - pd.Timedelta(hours=1))
+        forecast_lookback_start = forecast_lookback_end - pd.Timedelta(hours=lookback_hours) + pd.Timedelta(hours=1)
         df_forecast = df.loc[forecast_lookback_start:forecast_lookback_end, forecast_cols]
 
-        # Concatenate both feature sets
-        df_window = pd.concat([df_actual, df_forecast], axis=1)
+        df_window = pd.concat([df_actual.reset_index(drop=True), df_forecast.reset_index(drop=True)], axis=1)
 
-        # Convert to PyTorch tensors
+        if df_window.shape[0] != lookback_hours:
+            print(f"Warning: Lookback window shape mismatch at {current_day}")
+            print(f"Expected: {lookback_hours}, Got: {df_window.shape[0]}")
+            continue
+
         X_tensor = torch.tensor(df_window.values, dtype=torch.float32)
-        y_tensor = torch.tensor(y_df.values, dtype=torch.float32)
 
-        samples_X.append(X_tensor)  # Shape: (168, total_features)
-        samples_y.append(y_tensor)  # Shape: (24,)
+        samples_X.append(X_tensor)
+        samples_y.append(y_tensor)
 
-        # Move to next day
         current_day += pd.Timedelta(hours=step_size)
 
     return samples_X, samples_y
