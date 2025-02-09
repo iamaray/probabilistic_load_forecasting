@@ -67,47 +67,91 @@ class StandardScaleNorm:
 
 
 def readtoFiltered(csv_path, variates=[]):
-    """Returns a dataframe and a corresponding tensor with desired columns"""
+    """Returns a dataframe and a corresponding tensor with desired columns,
+    with an extra 'dow' column (day-of-week dummy variable: 1=Monday, …, 7=Sunday)."""
+
     df = pd.read_csv(csv_path)
     date_to_index = pd.to_datetime(df['marketday'])
 
+    # Compute the day-of-week (Monday=0, so add 1 to get Monday=1, Sunday=7)
+    day_of_week = date_to_index.dt.weekday + 1
+
     if len(variates) == 0:
-        numeric_feats = [name for name in list(
-            df.columns) if name != 'marketday']
-        filtered = df[numeric_feats]
-        filtered.fillna(0)
-        filtered.astype('float32')
-        return filtered[numeric_feats], torch.Tensor(filtered.values), date_to_index
+        numeric_feats = [name for name in df.columns if name != 'marketday']
+        filtered = df[numeric_feats].copy()
+    else:
+        numeric_feats = [name for name in variates if name != 'marketday']
+        filtered = df[numeric_feats].copy()
 
-    filtered = df[variates]
-    numeric_feats = [name for name in list(
-        filtered.columns) if name != 'marketday']
-    filtered = filtered[numeric_feats]
-    filtered = filtered.fillna(0)
-    filtered = filtered.astype('float32')
-    return filtered, torch.Tensor(filtered.values), date_to_index
+    filtered = filtered.fillna(0).astype('float32')
 
+    filtered['dow'] = day_of_week.values.astype('float32')
+
+    numeric_feats.append('dow')
+
+    return filtered, torch.tensor(filtered.values), date_to_index
+
+
+# def formPairs(
+#         x_tensor: torch.Tensor,
+#         y_tensor: torch.Tensor,
+#         window_length=168,
+#         prediction_length=24,
+#         step_size=1):
+#     """Takes a tensor with raw data and forms (X, y) pairs with a sliding window"""
+
+#     assert x_tensor.shape[0] == y_tensor.shape[0]
+#     N = x_tensor.shape[0]
+
+#     window_end = window_length
+#     prediction_end = window_length + prediction_length
+
+#     X = []
+#     Y = []
+
+#     while prediction_end <= N:
+#         x = x_tensor[window_end - window_length: window_end]
+#         y = y_tensor[window_end:prediction_end]
+
+#         x = x.unsqueeze(0) if x.ndim == 1 else x.transpose(0, 1)
+#         y = y.unsqueeze(0) if y.ndim == 1 else y.transpose(0, 1)
+
+#         X.append(x)
+#         Y.append(y)
+
+#         window_end += step_size
+#         prediction_end += step_size
+
+#     X = torch.stack(X)
+#     Y = torch.stack(Y)
+
+#     return X, Y
 
 def formPairs(
         x_tensor: torch.Tensor,
         y_tensor: torch.Tensor,
-        window_length=168,
-        prediction_length=24,
-        step_size=1):
-    """Takes a tensor with raw data and forms (X, y) pairs with a sliding window"""
+        x_start_hour: int = 9,
+        x_y_gap: int = 15,
+        x_window: int = 168,
+        y_window: int = 24,
+        step_size: int = 24):
 
     assert x_tensor.shape[0] == y_tensor.shape[0]
     N = x_tensor.shape[0]
 
-    window_end = window_length
-    prediction_end = window_length + prediction_length
+    x_start = x_start_hour - 1
+    # x_end = x_start + x_window
+
+    # y_start = x_end + x_y_gap
+    # y_end = y_start + y_window
 
     X = []
     Y = []
 
-    while prediction_end <= N:
-        x = x_tensor[window_end - window_length: window_end]
-        y = y_tensor[window_end:prediction_end]
+    while (x_start + x_window + x_y_gap + y_window) < N:
+        x = x_tensor[x_start: x_start + x_window, :]
+        y = y_tensor[x_start + x_window + x_y_gap: x_start +
+                     x_window + x_y_gap + y_window, :]
 
         x = x.unsqueeze(0) if x.ndim == 1 else x.transpose(0, 1)
         y = y.unsqueeze(0) if y.ndim == 1 else y.transpose(0, 1)
@@ -115,12 +159,10 @@ def formPairs(
         X.append(x)
         Y.append(y)
 
-        window_end += step_size
-        prediction_end += step_size
+        x_start += step_size
 
     X = torch.stack(X)
     Y = torch.stack(Y)
-
     return X, Y
 
 
@@ -183,7 +225,7 @@ def preprocess(
         variates=[],
         window_length=168,
         prediction_length=24,
-        step_size=1,
+        step_size=24,
         train_start_date=(datetime(2023, 2, 1), 0),  # date, hour,
         train_end_date=(datetime(2024, 6, 30), 23),
         test_start_date=(datetime(2024, 7, 1), 0),
@@ -229,6 +271,8 @@ def preprocess(
     x_train_raw = x_tensor[train_start_idx:train_end_idx + 1, :]
     y_train_raw = y_tensor[train_start_idx:train_end_idx + 1, :]
 
+    print(x_train_raw)
+
     x_test_raw = x_tensor[test_start_idx:test_end_idx + 1, :]
     y_test_raw = y_tensor[test_start_idx:test_end_idx + 1, :]
     train_norm = None
@@ -238,9 +282,6 @@ def preprocess(
         train_norm = data_norm(device=device)
         train_norm.fit(y_train_raw)
 
-        test_norm = data_norm(device=device)
-        test_norm.fit(y_test_raw)
-
     x_train, y_train = None, None
     x_test, y_test = None, None
 
@@ -248,15 +289,19 @@ def preprocess(
         x_train, y_train = formPairs(
             x_tensor=x_train_raw,
             y_tensor=y_train_raw,
-            window_length=window_length,
-            prediction_length=prediction_length,
+            x_start_hour=9,
+            x_y_gap=24,
+            x_window=window_length,
+            y_window=prediction_length,
             step_size=step_size)
 
         x_test, y_test = formPairs(
             x_tensor=x_test_raw,
             y_tensor=y_test_raw,
-            window_length=window_length,
-            prediction_length=prediction_length,
+            x_start_hour=9,
+            x_y_gap=24,
+            x_window=window_length,
+            y_window=prediction_length,
             step_size=step_size)
     else:
         num_targets, num_aux = 1, 1
@@ -283,10 +328,11 @@ def preprocess(
             prediction_length=prediction_length,
             step_size=step_size)
 
+    print(x_train, x_test)
     trainset = TensorDataset(x_train, y_train)
-    train_loader = DataLoader(dataset=trainset, batch_size=64, shuffle=True)
+    train_loader = DataLoader(dataset=trainset, batch_size=128, shuffle=True)
 
     testset = TensorDataset(x_test, y_test)
-    test_loader = DataLoader(testset, batch_size=64, shuffle=False)
+    test_loader = DataLoader(testset, batch_size=128, shuffle=False)
 
-    return df, train_loader, test_loader, train_norm, test_norm
+    return df, train_loader, test_loader, train_norm, date_to_index, test_start_idx
