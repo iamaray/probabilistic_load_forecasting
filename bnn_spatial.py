@@ -29,10 +29,6 @@ def main():
     for x, y in val_loader:
         print(x.shape, y.shape)
 
-    # model_wrapper = BSMDeTWrapper(cuda=False, num_targets=1, num_aux_feats=3)
-    # trainer = BayesTrainer(model_wrapper=model_wrapper,
-    #                        train_loader=train_loader, train_norm=train_norm, test_norm=test_norm)
-
     param_grid = {
         'num_targets': [1],
         'num_aux_feats': [14],
@@ -66,7 +62,7 @@ def main():
     #     'cuda': [True]
     # }
 
-    training_args = {'epochs': 100}
+    training_args = {'epochs': 1}
 
     grid_search_torch_model(
         model_class=BSMDeTWrapper,

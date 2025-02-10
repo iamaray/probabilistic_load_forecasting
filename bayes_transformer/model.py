@@ -116,6 +116,15 @@ class Encoder(nn.Module):
 
 class DecoderLayer(nn.Module):
     def __init__(self, d_model, dropout, h=8, d_ff=128, N=3):
+        """
+        d_model: model dimension.
+        dropout: dropout rate.
+        h: number of attention heads.
+        d_ff: inner dimension of the feed–forward network.
+        N: number of sublayer connections to create.
+           (Logically, we have 3 operations: self-attn, src-attn, feed-forward.
+            If N==1 or N==2, we combine operations; if N>3, extra layers apply feed-forward again.)
+        """
         super(DecoderLayer, self).__init__()
         self.size = d_model
         self.self_attn = MultiHeadedAttention(
@@ -129,9 +138,37 @@ class DecoderLayer(nn.Module):
 
     def forward(self, memory, x):
         m = memory
-        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x))
-        x = self.sublayer[1](x, lambda x: self.src_attn(x, m, m))
-        return self.sublayer[2](x, self.feed_forward)
+        N = len(self.sublayer)  # the variable number of sublayers
+
+        # Case 1: Only one sublayer -> combine all operations
+        if N == 1:
+            def combined(x):
+                x = self.self_attn(x, x, x)
+                x = self.src_attn(x, m, m)
+                x = self.feed_forward(x)
+                return x
+            return self.sublayer[0](x, combined)
+
+        # Case 2: Two sublayers -> first does self-attn; second does both src-attn and feed-forward.
+        elif N == 2:
+            x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x))
+
+            def combined(x):
+                x = self.src_attn(x, m, m)
+                x = self.feed_forward(x)
+                return x
+            return self.sublayer[1](x, combined)
+
+        # Case 3: Three or more sublayers:
+        #   - First sublayer applies self-attention.
+        #   - Second applies src-attention.
+        #   - All remaining sublayers apply feed-forward.
+        else:
+            x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x))
+            x = self.sublayer[1](x, lambda x: self.src_attn(x, m, m))
+            for i in range(2, N):
+                x = self.sublayer[i](x, self.feed_forward)
+            return x
 
 
 class Decoder(nn.Module):
