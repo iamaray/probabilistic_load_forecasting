@@ -4,7 +4,6 @@ import torch.optim as optim
 from tqdm import tqdm  # For progress bar
 import os
 
-
 class Trainer:
     def __init__(self, model, train_loader, val_loader, test_loader, criterion, optimizer, device="cpu"):
         """

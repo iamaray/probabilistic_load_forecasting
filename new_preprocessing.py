@@ -3,10 +3,12 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 from datetime import datetime, timedelta
-
+from preprocessing import MinMaxNorm
 ############################
 # 0) Strategically refill the dataframe
 ############################
+
+
 def strategic_fill(df):
     """
     Fills missing values in the DataFrame based on the following policy:
@@ -35,8 +37,6 @@ def strategic_fill(df):
     return df_filled
 
 
-
-
 ############################
 # 1) Read CSV and convert to DataFrame
 ############################
@@ -50,15 +50,16 @@ def load_data(csv_path, date_col='marketday', hour_col='hourending'):
     df['time'] = (pd.to_datetime(df[date_col])
                   + pd.to_timedelta(df[hour_col] - 1, unit='h'))
     df.set_index('time', inplace=True)
-    df['ERC_Wind'] = df['ERC_CWind'] + df['ERC_NWind'] + df['ERC_PWind'] + df['ERC_SWind'] + df['ERC_WWind']
-    df["ACTUAL_NetLoad"] = df["ACTUAL_ERC_Load"] - df["ACTUAL_ERC_Wind"] - df["ACTUAL_ERC_Solar"]
+    df['ERC_Wind'] = df['ERC_CWind'] + df['ERC_NWind'] + \
+        df['ERC_PWind'] + df['ERC_SWind'] + df['ERC_WWind']
+    df["ACTUAL_NetLoad"] = df["ACTUAL_ERC_Load"] - \
+        df["ACTUAL_ERC_Wind"] - df["ACTUAL_ERC_Solar"]
     df["NetLoad"] = df["ERC_Load"] - df["ERC_Wind"] - df["ERC_Solar"]
 
     df["Load_Error"] = df["ACTUAL_ERC_Load"] - df["ERC_Load"]
     df["Wind_Error"] = df["ACTUAL_ERC_Wind"] - df["ERC_Wind"]
     df["Solar_Error"] = df["ACTUAL_ERC_Solar"] - df["ERC_Solar"]
     df["NetLoad_Error"] = df["ACTUAL_NetLoad"] - df["NetLoad"]
-
 
     # Generate a complete hourly range for the period
     start_time = df.index.min()
@@ -81,7 +82,8 @@ def load_data(csv_path, date_col='marketday', hour_col='hourending'):
 
     # Add time-based features
     df['HoD'] = df.index.hour  # Hour of the Day (0 to 23)
-    df['DoW'] = df.index.dayofweek + 1  # Day of the Week (1=Monday to 7=Sunday)
+    # Day of the Week (1=Monday to 7=Sunday)
+    df['DoW'] = df.index.dayofweek + 1
     df['MoY'] = df.index.month
     return df
 
@@ -238,13 +240,6 @@ def standardize_df(df, train_start, train_end, val_start, val_end, columns):
 #     return samples_X, samples_y
 
 
-import pandas as pd
-import torch
-
-import pandas as pd
-import torch
-
-
 def new_formPairs(
         df,
         start_date,
@@ -252,9 +247,11 @@ def new_formPairs(
         lookback_hours=168,
         forecast_hours=24,
         forecast_deadline_hour=9,
-        actual_cols=["ACTUAL_NetLoad", "ACTUAL_ERC_Load", "ACTUAL_ERC_Wind", "ACTUAL_ERC_Solar"],
+        actual_cols=["ACTUAL_NetLoad", "ACTUAL_ERC_Load",
+                     "ACTUAL_ERC_Wind", "ACTUAL_ERC_Solar"],
         forecast_cols=["NetLoad", "ERC_Load", "ERC_Wind", "ERC_Solar"],
-        error_cols=["NetLoad_Error", "Load_Error", "Wind_Error", "Solar_Error"],
+        error_cols=["NetLoad_Error", "Load_Error",
+                    "Wind_Error", "Solar_Error"],
         aux_cols=["HoD", "DoW", "MoY"],
         step_size=24
 ):
@@ -281,17 +278,24 @@ def new_formPairs(
         forecast_start = current_day
         forecast_end = current_day + pd.Timedelta(hours=forecast_hours)
         df_future = df.loc[forecast_start:forecast_end - pd.Timedelta(hours=1)]
-        y_tensor = torch.tensor(df_future["ACTUAL_NetLoad"].values, dtype=torch.float32)
+        y_tensor = torch.tensor(
+            df_future["ACTUAL_NetLoad"].values, dtype=torch.float32)
 
-        actual_lookback_end = (current_day - pd.Timedelta(hours=24 - forecast_deadline_hour))
-        actual_lookback_start = actual_lookback_end - pd.Timedelta(hours=lookback_hours) + pd.Timedelta(hours=1)
-        df_actual = df.loc[actual_lookback_start:actual_lookback_end, selected_actual_cols]
+        actual_lookback_end = (
+            current_day - pd.Timedelta(hours=24 - forecast_deadline_hour))
+        actual_lookback_start = actual_lookback_end - \
+            pd.Timedelta(hours=lookback_hours) + pd.Timedelta(hours=1)
+        df_actual = df.loc[actual_lookback_start:actual_lookback_end,
+                           selected_actual_cols]
 
         forecast_lookback_end = (current_day - pd.Timedelta(hours=1))
-        forecast_lookback_start = forecast_lookback_end - pd.Timedelta(hours=lookback_hours) + pd.Timedelta(hours=1)
-        df_forecast = df.loc[forecast_lookback_start:forecast_lookback_end, forecast_cols]
+        forecast_lookback_start = forecast_lookback_end - \
+            pd.Timedelta(hours=lookback_hours) + pd.Timedelta(hours=1)
+        df_forecast = df.loc[forecast_lookback_start:
+                             forecast_lookback_end, forecast_cols]
 
-        df_window = pd.concat([df_actual.reset_index(drop=True), df_forecast.reset_index(drop=True)], axis=1)
+        df_window = pd.concat([df_actual.reset_index(
+            drop=True), df_forecast.reset_index(drop=True)], axis=1)
 
         if df_window.shape[0] != lookback_hours:
             print(f"Warning: Lookback window shape mismatch at {current_day}")

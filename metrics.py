@@ -2,7 +2,7 @@ import numpy as np
 import torch
 
 
-def compute_metrics(forecasts, ground_truth, alpha=0.2):
+def compute_metrics(forecasts, ground_truth, train_scaler=None, alpha=0.2):
     """
     Compute metrics for probabilistic forecasts:
     - 80% confidence interval
@@ -21,10 +21,12 @@ def compute_metrics(forecasts, ground_truth, alpha=0.2):
     if isinstance(forecasts, torch.Tensor):
         forecasts = forecasts.detach().cpu().numpy()
     if isinstance(ground_truth, torch.Tensor):
+        ground_truth = ground_truth.unsqueeze(-1)
+        ground_truth = train_scaler.reverse(ground_truth)
         ground_truth = ground_truth.detach().cpu().numpy()
-
     if forecasts.shape[:-1] != ground_truth.shape:
-        raise ValueError(f"Forecasts shape {forecasts.shape[:-1]} and ground truth shape {ground_truth.shape} are not aligned.")
+        raise ValueError(f"Forecasts shape {
+                         forecasts.shape[:-1]} and ground truth shape {ground_truth.shape} are not aligned.")
 
     lower_bound = np.percentile(forecasts, 100 * (alpha / 2), axis=-1)
     upper_bound = np.percentile(forecasts, 100 * (1 - alpha / 2), axis=-1)

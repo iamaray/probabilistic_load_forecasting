@@ -18,7 +18,7 @@ Interval Length, Pinball Loss, Energy Score and etc comparison.
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn  # <-- Add this line
+import torch.nn as nn
 import torch.optim as optim
 from datetime import datetime, timedelta
 
@@ -26,135 +26,167 @@ from datetime import datetime, timedelta
 from mm_stlf.models import MM_STLF
 from mm_stlf.trainer import Trainer
 from new_preprocessing import load_data, shift_forecast_columns, new_formPairs, standardize_df
+from preprocessing import MinMaxNorm, StandardScaleNorm
 
 
+def preprocess(spatial=True):
+    """1) Create the cleaned dataframe and save it into './data/ercot_data_cleaned.csv'"""
+    # Define 4 different categories of columns, actual_cols and error_cols behave the same
+    # while forecast_cols a little different (3rd party)
+    actual_cols = []
+    forecast_cols = []
+    error_cols = []
+    aux_cols = []
+    df = load_data(csv_path='data/ercot_data_2025_Jan.csv')
+    if spatial:
+        actual_cols = ["ACTUAL_NetLoad", "ACTUAL_ERC_Load",
+                       "ACTUAL_ERC_Wind", "ACTUAL_ERC_Solar"]
+        forecast_cols = ["NetLoad", "ERC_Load", "ERC_Wind", "ERC_Solar"]
+        error_cols = ["NetLoad_Error", "Load_Error",
+                      "Wind_Error", "Solar_Error"]
+        aux_cols = ["HoD", "DoW", "MoY"]
+        df = shift_forecast_columns(df, forecast_cols=[
+            "NetLoad", "ERC_Load", "ERC_Wind", "ERC_Solar"], shift_hours=-24)
 
-if __name__ == "__main__":
-	"""1) Create the cleaned dataframe and save it into './data/ercot_data_cleaned.csv'"""
-	# Define 4 different categories of columns, actual_cols and error_cols behave the same
-	# while forecast_cols a little different (3rd party)
-	actual_cols = ["ACTUAL_NetLoad", "ACTUAL_ERC_Load", "ACTUAL_ERC_Wind", "ACTUAL_ERC_Solar"]
-	forecast_cols = ["NetLoad", "ERC_Load", "ERC_Wind", "ERC_Solar"]
-	error_cols = ["NetLoad_Error", "Load_Error", "Wind_Error", "Solar_Error"]
-	aux_cols = ["HoD", "DoW", "MoY"]
-	df = load_data(csv_path='data/ercot_data_2025_Jan.csv')
-	df = shift_forecast_columns(df, forecast_cols=["NetLoad", "ERC_Load","ERC_Wind","ERC_Solar"],shift_hours=-24)
-	df_cleaned = df[actual_cols+error_cols+forecast_cols+aux_cols]
+    else:
+        actual_cols = ["ACTUAL_NetLoad"]
+        forecast_cols = ["NetLoad"]
+        error_cols = ["NetLoad_Error"]
+        aux_cols = ["HoD", "DoW", "MoY"]
+        df = shift_forecast_columns(
+            df, forecast_cols=forecast_cols, shift_hours=-24)
 
-	# df_cleaned.to_csv('./data/ercot_data_cleaned.csv')
+    df_cleaned = df[actual_cols+error_cols+forecast_cols+aux_cols]
+    # df_cleaned.to_csv('./data/ercot_data_cleaned.csv')
 
+    """2) Define date splits, and standardize data"""
+    train_start_date = datetime(2023, 2, 10)
+    train_end_date = datetime(2024, 7, 1)  # Training ends here
+    val_start_date = train_end_date  # Validation starts right after training
+    val_end_date = datetime(2024, 9, 1)  # Validation ends before test set
+    test_start_date = val_end_date  # Test set starts after validation
+    test_end_date = datetime(2025, 1, 6)
 
-	"""2) Define date splits, and standardize data"""
-	train_start_date = datetime(2023, 2, 10)
-	train_end_date = datetime(2024, 7, 1)  # Training ends here
-	val_start_date = train_end_date  # Validation starts right after training
-	val_end_date = datetime(2024, 9, 1)  # Validation ends before test set
-	test_start_date = val_end_date  # Test set starts after validation
-	test_end_date = datetime(2025, 1, 6)
+    """3) Standardize the df_clean"""
+    df_scaled, means, stds, df_train, df_val, df_test = standardize_df(
+        df=df_cleaned,
+        train_start=train_start_date,
+        train_end=train_end_date,
+        val_start=val_start_date,
+        val_end=val_end_date,
+        columns=actual_cols + error_cols + forecast_cols
+    )
+    minmax_norm = MinMaxNorm(device='cuda')
+    standard_scale_norm = StandardScaleNorm(device='cuda')
+    if spatial:
+        standard_scale_norm.num_transform = 12
+    else:
+        standard_scale_norm.num_transform = 3
 
+    standard_scale_norm.mean = torch.Tensor(means.values)
+    standard_scale_norm.std = torch.Tensor(stds.values)
+    standard_scale_norm.set_device('cuda')
+    print('here', standard_scale_norm.mean.shape)
 
-	"""3) Standardize the df_clean"""
-	df_scaled, means, stds, df_train, df_val, df_test = standardize_df(
-		df=df_cleaned,
-		train_start=train_start_date,
-		train_end=train_end_date,
-		val_start=val_start_date,
-		val_end=val_end_date,
-		columns=actual_cols + error_cols + forecast_cols
-	)
+    # print('here', type(means), type(stds))
+    print(df_scaled.head())
 
-	print(df_scaled.head())
+    """4) Prepare the (X,y) pairs for the train, validation and test"""
+    # Training Data
+    samples_X_train, samples_y_train = new_formPairs(
+        df=df_scaled,
+        start_date=train_start_date,
+        end_date=train_end_date,
+        actual_cols=actual_cols,
+        forecast_cols=forecast_cols,
+        error_cols=error_cols,  # Optional if default
+        aux_cols=aux_cols,  # Optional if default
+        lookback_hours=168,
+        forecast_hours=24,
+        forecast_deadline_hour=9,  # Starting from the 9 AM of the previous day
+        step_size=24  # Moving 1 day at a time
+    )
 
-	"""4) Prepare the (X,y) pairs for the train, validation and test"""
-	# Training Data
-	samples_X_train, samples_y_train = new_formPairs(
-		df=df_scaled,
-		start_date=train_start_date,
-		end_date=train_end_date,
-		actual_cols=actual_cols,
-		forecast_cols=forecast_cols,
-		error_cols=["NetLoad_Error", "Load_Error", "Wind_Error", "Solar_Error"],  # Optional if default
-		aux_cols=["HoD", "DoW", "MoY"],  # Optional if default
-		lookback_hours=168,
-		forecast_hours=24,
-		forecast_deadline_hour=9,  # Starting from the 9 AM of the previous day
-		step_size=24  # Moving 1 day at a time
-	)
+    # Validation Data
+    samples_X_val, samples_y_val = new_formPairs(
+        df=df_scaled,
+        start_date=val_start_date,
+        end_date=val_end_date,
+        actual_cols=actual_cols,
+        forecast_cols=forecast_cols,
+        error_cols=error_cols,
+        aux_cols=aux_cols,
+        lookback_hours=168,
+        forecast_hours=24,
+        forecast_deadline_hour=9,
+        step_size=24
+    )
 
-	# Validation Data
-	samples_X_val, samples_y_val = new_formPairs(
-		df=df_scaled,
-		start_date=val_start_date,
-		end_date=val_end_date,
-		actual_cols=actual_cols,
-		forecast_cols=forecast_cols,
-		error_cols=["NetLoad_Error", "Load_Error", "Wind_Error", "Solar_Error"],
-		aux_cols=["HoD", "DoW", "MoY"],
-		lookback_hours=168,
-		forecast_hours=24,
-		forecast_deadline_hour=9,
-		step_size=24
-	)
+    # Test Data
+    samples_X_test, samples_y_test = new_formPairs(
+        df=df_scaled,
+        start_date=test_start_date,
+        end_date=test_end_date,
+        actual_cols=actual_cols,
+        forecast_cols=forecast_cols,
+        error_cols=error_cols,
+        aux_cols=aux_cols,
+        lookback_hours=168,
+        forecast_hours=24,
+        forecast_deadline_hour=9,
+        step_size=24
+    )
 
-	# Test Data
-	samples_X_test, samples_y_test = new_formPairs(
-		df=df_scaled,
-		start_date=test_start_date,
-		end_date=test_end_date,
-		actual_cols=actual_cols,
-		forecast_cols=forecast_cols,
-		error_cols=["NetLoad_Error", "Load_Error", "Wind_Error", "Solar_Error"],
-		aux_cols=["HoD", "DoW", "MoY"],
-		lookback_hours=168,
-		forecast_hours=24,
-		forecast_deadline_hour=9,
-		step_size=24
-	)
+    print("Train samples:", len(samples_X_train))
+    print("Validation samples:", len(samples_X_val))
+    print("Test samples:", len(samples_X_test))
 
-	print("Train samples:", len(samples_X_train))
-	print("Validation samples:", len(samples_X_val))
-	print("Test samples:", len(samples_X_test))
+    """5) Build the DataLoaders using the (X,y) pairs"""
+    X_train_tensor = torch.stack(samples_X_train, dim=0)
+    y_train_tensor = torch.stack(samples_y_train, dim=0)
+    # minmax_norm.fit(X_train_tensor)
+    # standard_scale_norm.fit(X_train_tensor)
 
-	"""5) Build the DataLoaders using the (X,y) pairs"""
-	X_train_tensor = torch.stack(samples_X_train, dim=0)
-	y_train_tensor = torch.stack(samples_y_train, dim=0)
+    X_val_tensor = torch.stack(samples_X_val, dim=0)
+    y_val_tensor = torch.stack(samples_y_val, dim=0)
 
-	X_val_tensor = torch.stack(samples_X_val, dim=0)
-	y_val_tensor = torch.stack(samples_y_val, dim=0)
+    X_test_tensor = torch.stack(samples_X_test, dim=0)
+    y_test_tensor = torch.stack(samples_y_test, dim=0)
 
-	X_test_tensor = torch.stack(samples_X_test, dim=0)
-	y_test_tensor = torch.stack(samples_y_test, dim=0)
+    print(X_train_tensor[1].shape)
 
-	print(X_train_tensor[1].shape)
+    train_dataset = torch.utils.data.TensorDataset(
+        X_train_tensor, y_train_tensor)
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, batch_size=64, shuffle=True, pin_memory=True)
 
+    val_dataset = torch.utils.data.TensorDataset(X_val_tensor, y_val_tensor)
+    val_loader = torch.utils.data.DataLoader(
+        val_dataset, batch_size=64, shuffle=False, pin_memory=True)
 
-	train_dataset = torch.utils.data.TensorDataset(X_train_tensor, y_train_tensor)
-	train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True)
+    test_dataset = torch.utils.data.TensorDataset(X_test_tensor, y_test_tensor)
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset, batch_size=64, shuffle=False, pin_memory=True)
 
-	val_dataset = torch.utils.data.TensorDataset(X_val_tensor, y_val_tensor)
-	val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=32, shuffle=False)
+    torch.save(train_dataset, './data/train_dataset.pt')
+    torch.save(val_dataset, './data/val_dataset.pt')
+    torch.save(test_dataset, './data/test_dataset.pt')
 
-	test_dataset = torch.utils.data.TensorDataset(X_test_tensor, y_test_tensor)
-	test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=32, shuffle=False)
+    """Use the following code to laod the dataloader"""
+    # # Load the saved datasets
+    # actual_cols = ["ACTUAL_NetLoad", "ACTUAL_ERC_Load", "ACTUAL_ERC_Wind", "ACTUAL_ERC_Solar"]
+    # forecast_cols = ["NetLoad", "ERC_Load", "ERC_Wind", "ERC_Solar"]
+    # error_cols = ["NetLoad_Error", "Load_Error", "Wind_Error", "Solar_Error"]
+    # aux_cols = ["HoD", "DoW", "MoY"]
+    #
+    # # Load the saved datasets
+    # train_dataset = torch.load('./data/train_dataset.pt', weights_only=False)
+    # val_dataset = torch.load('./data/val_dataset.pt', weights_only=False)
+    # test_dataset = torch.load('./data/test_dataset.pt', weights_only=False)
+    #
+    # # Recreate the DataLoaders
+    # train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True)
+    # val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=32, shuffle=False)
+    # test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=32, shuffle=False)
 
-	torch.save(train_dataset, './data/train_dataset.pt')
-	torch.save(val_dataset, './data/val_dataset.pt')
-	torch.save(test_dataset, './data/test_dataset.pt')
-
-
-	"""Use the following code to laod the dataloader"""
-	# # Load the saved datasets
-	# actual_cols = ["ACTUAL_NetLoad", "ACTUAL_ERC_Load", "ACTUAL_ERC_Wind", "ACTUAL_ERC_Solar"]
-	# forecast_cols = ["NetLoad", "ERC_Load", "ERC_Wind", "ERC_Solar"]
-	# error_cols = ["NetLoad_Error", "Load_Error", "Wind_Error", "Solar_Error"]
-	# aux_cols = ["HoD", "DoW", "MoY"]
-	#
-	# # Load the saved datasets
-	# train_dataset = torch.load('./data/train_dataset.pt', weights_only=False)
-	# val_dataset = torch.load('./data/val_dataset.pt', weights_only=False)
-	# test_dataset = torch.load('./data/test_dataset.pt', weights_only=False)
-	#
-	# # Recreate the DataLoaders
-	# train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True)
-	# val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=32, shuffle=False)
-	# test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=32, shuffle=False)
+    return minmax_norm, standard_scale_norm, train_loader, val_loader, test_loader

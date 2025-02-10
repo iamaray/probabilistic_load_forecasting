@@ -1,21 +1,23 @@
-from preprocessing import readtoFiltered, preprocess
+# from preprocessing import readtoFiltered, preprocess
 from bayes_transformer.model import BSMDeTWrapper
 from bayes_transformer.trainer import BayesTrainer
 # from grid_search import grid_search_torch_model
 from bayes_transformer.trainer import grid_search_torch_model
 import torch
 from preprocessing import MinMaxNorm
+from final_data_prep import preprocess
 from datetime import datetime
 import torch.multiprocessing as mp
 
 
 def main():
-    df, train_loader, test_loader, train_norm, date_to_index, test_start_idx = preprocess(
-        csv_path='data/ercot_data_2025_Jan.csv',
-        net_load_input=False,
-        variates=['marketday', 'ACTUAL_ERC_Load',
-                  'ACTUAL_ERC_Solar', 'ACTUAL_ERC_Wind', 'hourending'],
-        device='cuda')
+    # df, train_loader, test_loader, train_norm, date_to_index, test_start_idx = preprocess(
+    #     csv_path='data/ercot_data_2025_Jan.csv',
+    #     net_load_input=True,
+    #     variates=['marketday', 'ACTUAL_ERC_Load',
+    #               'ACTUAL_ERC_Solar', 'ACTUAL_ERC_Wind', 'hourending'],
+    #     device='cuda')
+    minmax_norm, standard_scale_norm, train_loader, val_loader, test_loader = preprocess()
 
     # print(type(test_norm), type(train_norm))
     # print(test_norm.min_val, train_norm.min_val)
@@ -24,7 +26,7 @@ def main():
     for x, y in train_loader:
         print(x.shape, y.shape)
 
-    for x, y in test_loader:
+    for x, y in val_loader:
         print(x.shape, y.shape)
 
     # model_wrapper = BSMDeTWrapper(cuda=False, num_targets=1, num_aux_feats=3)
@@ -33,7 +35,7 @@ def main():
 
     param_grid = {
         'num_targets': [1],
-        'num_aux_feats': [4],
+        'num_aux_feats': [14],
         'd_model': [32],
         'encoder_layers': [2, 3],
         'encoder_d_ff': [128],
@@ -72,10 +74,10 @@ def main():
         param_grid=param_grid,
         training_args=training_args,
         train_loader=train_loader,
-        test_loader=test_loader,
+        test_loader=val_loader,
         savename='bmdet_best_non_spatial.pt',
-        train_norm=train_norm,
-        test_norm=train_norm,
+        train_norm=standard_scale_norm,
+        test_norm=standard_scale_norm,
         max_workers=2)
 
 
