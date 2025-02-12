@@ -1,0 +1,15 @@
+{
+  "num_targets": 1,
+  "num_aux_feats": 5,
+  "d_model": 64,
+  "encoder_layers": 3,
+  "encoder_d_ff": 512,
+  "encoder_sublayers": 2,
+  "encoder_h": 8,
+  "encoder_dropout": 0.1,
+  "decoder_layers": 3,
+  "decoder_dropout": 0.1,
+  "decoder_h": 8,
+  "decoder_d_ff": 128,
+  "decoder_sublayers": 3
+}

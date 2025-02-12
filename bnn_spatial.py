@@ -11,20 +11,17 @@ import torch.multiprocessing as mp
 
 
 def main():
-    # df, train_loader, test_loader, train_norm, date_to_index, test_start_idx = preprocess(
-    #     csv_path='data/ercot_data_2025_Jan.csv',
-    #     net_load_input=True,
-    #     variates=['marketday', 'ACTUAL_ERC_Load',
-    #               'ACTUAL_ERC_Solar', 'ACTUAL_ERC_Wind', 'hourending'],
-    #     device='cuda')
-    minmax_norm, standard_scale_norm, train_loader, val_loader, test_loader = preprocess()
+    minmax_norm, standard_scale_norm, train_loader, val_loader, test_loader = preprocess(
+        spatial=True)
 
-    # print(type(test_norm), type(train_norm))
-    # print(test_norm.min_val, train_norm.min_val)
-    # print(test_norm.max_val, train_norm.max_val)
+    print("TRAIN LOADER SAMPLES:")
 
     for x, y in train_loader:
         print(x.shape, y.shape)
+        standard_scale_norm.transform(x.to('cuda'))
+        standard_scale_norm.reverse(x.to('cuda'))
+
+    print("\nVAL LOADER SAMPLES:")
 
     for x, y in val_loader:
         print(x.shape, y.shape)
@@ -45,23 +42,6 @@ def main():
         'decoder_sublayers': [2, 3]
     }
 
-    # param_grid = {
-    #     'num_targets': [1],
-    #     'num_aux_feats': [1],
-    #     'd_model': [32],
-    #     'encoder_layers': [2],
-    #     'encoder_d_ff': [128],
-    #     'encoder_sublayers': [2],
-    #     'encoder_h': [8],
-    #     'encoder_dropout': [0.1],
-    #     'decoder_layers': [2],
-    #     'decoder_dropout': [0.1],
-    #     'decoder_h': [8],
-    #     'decoder_d_ff': [128],
-    #     'decoder_sublayers': [3],
-    #     'cuda': [True]
-    # }
-
     training_args = {'epochs': 1}
 
     grid_search_torch_model(
@@ -71,10 +51,16 @@ def main():
         training_args=training_args,
         train_loader=train_loader,
         test_loader=val_loader,
-        savename='bmdet_best_non_spatial.pt',
+        savename='bmdet_best_spatial.pt',
         train_norm=standard_scale_norm,
         test_norm=standard_scale_norm,
         max_workers=2)
+
+    # model = BSMDeTWrapper(num_aux_feats=5)
+    # trainer = BayesTrainer(model_wrapper=model, train_loader=train_loader,
+    #                        device='cuda', train_norm=standard_scale_norm, modelsave=True)
+    # trainer.train(epochs=100)
+    # trainer.test(test_loader=train_loader, samples=20)
 
 
 if __name__ == "__main__":
