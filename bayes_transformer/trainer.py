@@ -24,6 +24,7 @@ class BayesTrainer:
                  num_targets=1, num_aux_feats=0, window_len=168, ahead=1,
                  train_norm=None, modelsave=False, savename='bmdet', device=None):
         self.modelsave = modelsave
+        self.savename = savename
         self.device = device if device is not None else torch.device(
             "cuda:0" if torch.cuda.is_available() else "cpu")
         print(
@@ -95,7 +96,7 @@ class BayesTrainer:
 
         if self.modelsave:
             try:
-                self._save_model(savename)
+                self._save_model(self.savename)
             except Exception as e:
                 print(f"Model saving failed: {str(e)}")
 
