@@ -4,6 +4,8 @@ from bayes_transformer.trainer import BayesTrainer
 import torch
 import json
 import argparse
+import os
+from data_proc import StandardScaleNorm, MinMaxNorm
 
 
 def main():
@@ -16,13 +18,30 @@ def main():
                         help='Number of training epochs')
     parser.add_argument('--device', type=str, default='cuda',
                         help='Device to train on (cuda/cpu)')
-    parser.add_argument('--spatial', action='store_false',
+    parser.add_argument('--suffix', type=str, default='non_spatial',
                         help='Whether to use spatial features')
 
     args = parser.parse_args()
 
-    _, standard_scale_norm, train_loader, _, _ = preprocess(
-        spatial=args.spatial, device=args.device)
+    # _, standard_scale_norm, train_loader, _, _ = preprocess(
+    #     spatial=args.spatial, device=args.device)
+
+    # train_loader = torch.load('data/non_spatial/train_loader_non_spatial.pt')
+    # val_loader = torch.load('data/non_spatial/val_loader_non_spatial.pt')
+    # test_loader = torch.load('data/non_spatial/test_loader_non_spatial.pt')
+    # norms = torch.load(
+    #     os.path.join("data/non_spatial", "transforms_non_spatial.pt"))
+
+    train_loader = torch.load(
+        f'data/{args.suffix}/train_loader_{args.suffix}.pt')
+    val_loader = torch.load(f'data/{args.suffix}/val_loader_{args.suffix}.pt')
+    test_loader = torch.load(
+        f'data/{args.suffix}/test_loader_{args.suffix}.pt')
+    norms = torch.load(
+        os.path.join(f"data/{args.suffix}", f"transforms_{args.suffix}.pt"))
+
+    for (x, y) in train_loader:
+        print(x.shape, y.shape)
 
     device = torch.device(args.device)
 
@@ -31,15 +50,11 @@ def main():
 
     model = BSMDeTWrapper(**hyperparams)
     trainer = BayesTrainer(model_wrapper=model, train_loader=train_loader,
-                           train_norm=standard_scale_norm, device=device,
-                           modelsave=True, savename='bmdet_non_spatial')
+                           device=device, modelsave=True, savename=f'bmdet_{args.suffix}')
 
     print(f"TRAINING ON {hyperparams}\n")
 
-    try:
-        trainer.train(epochs=args.train_epochs)
-    except Exception as e:
-        print(f"Training Failed: {str(e)}")
+    trainer.train(epochs=args.train_epochs)
 
 
 if __name__ == "__main__":

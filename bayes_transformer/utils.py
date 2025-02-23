@@ -59,7 +59,7 @@ def variational_estimator(nn_class):
 
         for _ in range(sample_nbr):
             outs = self(inputs)
-            scaler.reverse(outs)
+            # scaler.reverse(outs)
 
             rmses = torch.stack([rmse_loss(outs[:, :, i], labels[:, :, i])
                                  for i in range(num_targets)])

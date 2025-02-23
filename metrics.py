@@ -22,7 +22,7 @@ def compute_metrics(forecasts, ground_truth, train_scaler=None, alpha=0.2):
         forecasts = forecasts.detach().cpu().numpy()
     if isinstance(ground_truth, torch.Tensor):
         ground_truth = ground_truth.unsqueeze(-1)
-        ground_truth = train_scaler.reverse(ground_truth)
+        # ground_truth = train_scaler.reverse(ground_truth)
         ground_truth = ground_truth.detach().cpu().numpy()
     if forecasts.shape[:-1] != ground_truth.shape:
         raise ValueError(f"Forecasts shape {

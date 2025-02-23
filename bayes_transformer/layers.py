@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
-from .distributions import TrainableRandomDistribution, PriorWeightDistribution
+from .distributions import TrainableRandomDistribution, PriorWeightDistribution, PriorWeightStudentT
 
 
 class BayesianLinear(nn.Module):
