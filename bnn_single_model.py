@@ -8,54 +8,75 @@ import os
 from data_proc import StandardScaleNorm, MinMaxNorm
 
 
-def main():
-    # Set up argument parser
-    parser = argparse.ArgumentParser(description='Train BNN model')
-    parser.add_argument('--hyperparam_path', type=str,
-                        default='modelsave/bmdet/best_hyperparams_non_spatial.json',
-                        help='Path to hyperparameter JSON file')
-    parser.add_argument('--train_epochs', type=int, default=100,
-                        help='Number of training epochs')
-    parser.add_argument('--device', type=str, default='cuda',
-                        help='Device to train on (cuda/cpu)')
-    parser.add_argument('--suffix', type=str, default='non_spatial',
-                        help='Whether to use spatial features')
+def main(
+        terminal_args=True,
+        hyperparam_path=None,
+        train_epochs=None,
+        device=None,
+        suffix=None,
+        save_suff=None,
+        model=None):
 
-    args = parser.parse_args()
+    args = None
 
-    # _, standard_scale_norm, train_loader, _, _ = preprocess(
-    #     spatial=args.spatial, device=args.device)
+    if terminal_args:
+        parser = argparse.ArgumentParser(description='Train BNN model')
+        parser.add_argument('--hyperparam_path', type=str,
+                            default='modelsave/bmdet/best_hyperparams_non_spatial.json',
+                            help='Path to hyperparameter JSON file')
+        parser.add_argument('--train_epochs', type=int, default=100,
+                            help='Number of training epochs')
+        parser.add_argument('--device', type=str, default='cuda',
+                            help='Device to train on (cuda/cpu)')
+        parser.add_argument('--suffix', type=str, default='non_spatial',
+                            help='Whether to use spatial features')
 
-    # train_loader = torch.load('data/non_spatial/train_loader_non_spatial.pt')
-    # val_loader = torch.load('data/non_spatial/val_loader_non_spatial.pt')
-    # test_loader = torch.load('data/non_spatial/test_loader_non_spatial.pt')
-    # norms = torch.load(
-    #     os.path.join("data/non_spatial", "transforms_non_spatial.pt"))
+        args = parser.parse_args()
+
+    if args is not None:
+        hyperparam_path = args.hyperparam_path
+        train_epochs = args.train_epochs
+        device = args.device
+        suffix = args.suffix
+        # _, standard_scale_norm, train_loader, _, _ = preprocess(
+        #     spatial=args.spatial, device=args.device)
+
+        # train_loader = torch.load('data/non_spatial/train_loader_non_spatial.pt')
+        # val_loader = torch.load('data/non_spatial/val_loader_non_spatial.pt')
+        # test_loader = torch.load('data/non_spatial/test_loader_non_spatial.pt')
+        # norms = torch.load(
+        #     os.path.join("data/non_spatial", "transforms_non_spatial.pt"))
 
     train_loader = torch.load(
-        f'data/{args.suffix}/train_loader_{args.suffix}.pt')
-    val_loader = torch.load(f'data/{args.suffix}/val_loader_{args.suffix}.pt')
+        f'data/{suffix}/train_loader_{suffix}.pt')
+    val_loader = torch.load(f'data/{suffix}/val_loader_{suffix}.pt')
     test_loader = torch.load(
-        f'data/{args.suffix}/test_loader_{args.suffix}.pt')
+        f'data/{suffix}/test_loader_{suffix}.pt')
     norms = torch.load(
-        os.path.join(f"data/{args.suffix}", f"transforms_{args.suffix}.pt"))
+        os.path.join(f"data/{suffix}", f"transforms_{suffix}.pt"))
 
     for (x, y) in train_loader:
         print(x.shape, y.shape)
 
-    device = torch.device(args.device)
+    device = torch.device(device)
 
-    with open(args.hyperparam_path, 'r') as f:
-        hyperparams = json.load(f)
+    if model is None:
+        with open(hyperparam_path, 'r') as f:
+            hyperparams = json.load(f)
+        model = BSMDeTWrapper(**hyperparams)
 
-    model = BSMDeTWrapper(**hyperparams)
+    savename = suffix
+    if save_suff is not None:
+        savename = suffix + "_" + save_suff
+
     trainer = BayesTrainer(model_wrapper=model, train_loader=train_loader,
-                           device=device, modelsave=True, savename=f'bmdet_{args.suffix}')
+                           device=device, modelsave=True, savename=f'bmdet_{savename}')
 
-    print(f"TRAINING ON {hyperparams}\n")
+    # print(f"TRAINING ON {hyperparams}\n")
 
-    trainer.train(epochs=args.train_epochs)
+    trained_model = trainer.train(epochs=train_epochs)
 
+    return trained_model
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()

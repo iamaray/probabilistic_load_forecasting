@@ -93,6 +93,7 @@ class BayesTrainer:
             self.loss_train[epoch] /= self.Nbatch
             self.mu_list[epoch] /= self.Nbatch
             self.rho_list[epoch] /= self.Nbatch
+        return self.net
 
         if self.modelsave:
             try:

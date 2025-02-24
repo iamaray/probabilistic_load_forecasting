@@ -41,15 +41,16 @@ def main(
         test_start_date,
         test_end_date,
         device,
-        plot_name):
+        plot_name,
+        model=None):
 
     if not torch.cuda.is_available():
         device = torch.device('cpu')
     else:
         device = torch.device(device)
-
-    model = torch.load(model_path, map_location=device)
-    model.eval()
+    if model is None:
+        model = torch.load(model_path, map_location=device)
+        model.eval()
 
     # with open('modelsave/bmdet/best_hyperparams_non_spatial.json', 'r') as f:
     #     hyperparams = json.load(f)
