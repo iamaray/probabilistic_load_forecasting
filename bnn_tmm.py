@@ -25,7 +25,7 @@ def main(dist_params: dict, hyperparam_path, spatial_arg='non_spatial', device='
         mus=torch.Tensor([0, dist_params['mu2']])
     )
 
-    suffix = 'spatial' if spatial else 'non_spatial'
+    # suffix = 'spatial' if spatial else 'non_spatial'
 
     try:
         # Load and update hyperparameters with prior distribution
@@ -37,7 +37,7 @@ def main(dist_params: dict, hyperparam_path, spatial_arg='non_spatial', device='
         print("COULD NOT SAVE EVAL REULTS")
 
     # Create save suffix with distribution parameters
-    save_suff = f"tmm_pi{dist_params['pi']}_nu1{dist_params['nu1']}_nu2{dist_params['nu2']}_sigma1{dist_params['sigma1']}_sigma2{dist_params['sigma2']}"
+    save_suff = f"tmm_pi{dist_params['pi']}_nu1{dist_params['nu1']}_nu2{dist_params['nu2']}_sigma1{dist_params['sigma1']}_sigma2{dist_params['sigma2']}_mu2{dist_params['mu2']}"
     model = BSMDeTWrapper(**hyperparams)
     print('HERE0:', model.prior.PI)
     # Train model
@@ -46,29 +46,29 @@ def main(dist_params: dict, hyperparam_path, spatial_arg='non_spatial', device='
         hyperparam_path=hyperparam_path,
         train_epochs=1,
         device=device,
-        suffix=suffix,
+        suffix=spatial_arg,
         save_suff=save_suff,
         model=model
     )
 
     # Evaluate model
     results = bnn_inference.main(
-        model_path=f'modelsave/bmdet/bmdet_{suffix}_{save_suff}.pt',
-        test_loader_path=f'data/{suffix}/test_loader_{suffix}.pt',
-        train_norm_path=f'data/{suffix}/transforms_{suffix}.pt',
+        model_path=f'modelsave/bmdet/bmdet_{spatial_arg}_{save_suff}.pt',
+        test_loader_path=f'data/{spatial_arg}/test_loader_{spatial_arg}.pt',
+        train_norm_path=f'data/{spatial_arg}/transforms_{spatial_arg}.pt',
         raw_csv_path='',
         num_samples=40,
-        new_csv_savename=f'results/bmdet_{suffix}_{save_suff}_stats.csv',
+        new_csv_savename=f'results/bmdet_{spatial_arg}_{save_suff}_stats.csv',
         test_start_date=datetime(2024, 9, 1),
         test_end_date=datetime(2025, 1, 6),
         device=device,
-        plot_name=f'{suffix}_{save_suff}',
+        plot_name=f'{spatial_arg}_{save_suff}',
         model=trained_model
     )
 
     # Save evaluation results
     os.makedirs('results', exist_ok=True)
-    with open(f'results/metrics_{suffix}_{save_suff}.json', 'w') as f:
+    with open(f'results/metrics_{spatial_arg}_{save_suff}.json', 'w') as f:
         # Convert numpy/torch values to native Python types for JSON serialization
         results_serializable = {k: float(v) for k, v in results.items()}
         json.dump(results_serializable, f, indent=4)
@@ -104,7 +104,7 @@ if __name__ == "__main__":
         print(f"\nRunning experiment with parameters: {params}")
         results = main(
             dist_params=params,
-            hyperparam_path='modelsave/bmdet/best_hyperparams_non_spatial.json',
+            hyperparam_path=f'modelsave/bmdet/best_hyperparams_{args.spatial}.json',
             spatial_arg=args.spatial,
             device='cuda' if torch.cuda.is_available() else 'cpu'
         )
