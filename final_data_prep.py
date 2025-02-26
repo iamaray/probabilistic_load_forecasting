@@ -29,7 +29,7 @@ from new_preprocessing import load_data, shift_forecast_columns, new_formPairs, 
 from preprocessing import MinMaxNorm, StandardScaleNorm
 
 
-def preprocess(spatial=True):
+def preprocess(spatial=True, device='cuda'):
     """1) Create the cleaned dataframe and save it into './data/ercot_data_cleaned.csv'"""
     # Define 4 different categories of columns, actual_cols and error_cols behave the same
     # while forecast_cols a little different (3rd party)
@@ -76,8 +76,8 @@ def preprocess(spatial=True):
         val_end=val_end_date,
         columns=actual_cols + error_cols + forecast_cols
     )
-    minmax_norm = MinMaxNorm(device='cuda')
-    standard_scale_norm = StandardScaleNorm(device='cuda')
+    minmax_norm = MinMaxNorm(device=device)
+    standard_scale_norm = StandardScaleNorm(device=device)
     if spatial:
         standard_scale_norm.num_transform = 12
     else:
@@ -85,7 +85,7 @@ def preprocess(spatial=True):
 
     standard_scale_norm.mean = torch.Tensor(means.values)
     standard_scale_norm.std = torch.Tensor(stds.values)
-    standard_scale_norm.set_device('cuda')
+    standard_scale_norm.set_device(device)
     print('here', standard_scale_norm.mean.shape)
 
     # print('here', type(means), type(stds))
@@ -158,15 +158,15 @@ def preprocess(spatial=True):
     train_dataset = torch.utils.data.TensorDataset(
         X_train_tensor, y_train_tensor)
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=64, shuffle=True, pin_memory=True)
+        train_dataset, batch_size=64, shuffle=True, pin_memory=(device=='cuda'))
 
     val_dataset = torch.utils.data.TensorDataset(X_val_tensor, y_val_tensor)
     val_loader = torch.utils.data.DataLoader(
-        val_dataset, batch_size=64, shuffle=False, pin_memory=True)
+        val_dataset, batch_size=64, shuffle=False, pin_memory=(device=='cuda'))
 
     test_dataset = torch.utils.data.TensorDataset(X_test_tensor, y_test_tensor)
     test_loader = torch.utils.data.DataLoader(
-        test_dataset, batch_size=64, shuffle=False, pin_memory=True)
+        test_dataset, batch_size=64, shuffle=False, pin_memory=(device=='cuda'))
 
     torch.save(train_dataset, './data/train_dataset.pt')
     torch.save(val_dataset, './data/val_dataset.pt')
