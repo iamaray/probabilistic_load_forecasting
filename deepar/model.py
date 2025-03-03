@@ -1,18 +1,11 @@
-# from torch.autograd import Variable
-# import torch.nn.functional as F
-# import numpy as np
-# import math
-# import torch
-# import torch.nn as nn
-# from torch.nn.utils.rnn import PackedSequence
-# from typing import *
-
-
-import torch.optim as optim
-import torch.nn.functional as F
-import torch.nn as nn
-import torch
 import math
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.nn.utils.rnn import PackedSequence
+from typing import Optional
+
+# Variational Dropout remains unchanged.
 
 
 class VariationalDropout(nn.Module):
@@ -46,205 +39,93 @@ class VariationalDropout(nn.Module):
         else:
             return x
 
-
-# class LSTM(nn.LSTM):
-#     def __init__(self, *args, dropouti: float = 0.,
-#                  dropoutw: float = 0., dropouto: float = 0.,
-#                  batch_first=True, unit_forget_bias=True, **kwargs):
-#         super().__init__(*args, **kwargs, batch_first=batch_first)
-#         self.unit_forget_bias = unit_forget_bias
-#         self.dropoutw = dropoutw
-#         self.input_drop = VariationalDropout(dropouti,
-#                                              batch_first=batch_first)
-#         self.output_drop = VariationalDropout(dropouto,
-#                                               batch_first=batch_first)
-#         self._init_weights()
-
-#     def _init_weights(self):
-#         """
-#         Use orthogonal init for recurrent layers, xavier uniform for input layers
-#         Bias is 0 except for forget gate
-#         """
-#         for name, param in self.named_parameters():
-#             if "weight_hh" in name:
-#                 nn.init.orthogonal_(param.data)
-#             elif "weight_ih" in name:
-#                 nn.init.xavier_uniform_(param.data)
-#             elif "bias" in name and self.unit_forget_bias:
-#                 nn.init.zeros_(param.data)
-#                 param.data[self.hidden_size:2 * self.hidden_size] = 1
-
-#     def _drop_weights(self):
-#         for name, param in self.named_parameters():
-#             if "weight_hh" in name:
-#                 getattr(self, name).data = \
-#                     torch.nn.functional.dropout(param.data, p=self.dropoutw,
-#                                                 training=self.training).contiguous()
-
-#     def forward(self, input, hx=None):
-#         self._drop_weights()
-#         input = self.input_drop(input)
-#         seq, state = super().forward(input, hx=hx)
-#         return self.output_drop(seq), state
+# A custom LSTM that applies variational dropout on inputs, weights, and outputs.
 
 
-# class Net(nn.Module):
-#     def __init__(self, num_class: int = 100, embedding_dim: int = 32, cov_dim: int = 4, lstm_hidden_dim: int = 128,
-#                  lstm_layers: int = 3, lstm_dropout: float = 0.1, device: str = 'cuda', predict_steps: int = 24,
-#                  predict_start: int = 0, sample_times: int = 100):
-#         '''
-#         We define a recurrent network that predicts the future values of a time-dependent variable based on
-#         past inputs and covariates.
-#         '''
-#         super(Net, self).__init__()
-#         self.num_class = num_class
-#         self.embedding_dim = embedding_dim
-#         self.cov_dim = cov_dim
-#         self.lstm_hidden_dim = lstm_hidden_dim
-#         self.lstm_layers = lstm_layers
-#         self.lstm_dropout = lstm_dropout
-#         self.device = device
-#         self.predict_steps = predict_steps
-#         self.predict_start = predict_start
-#         self.sample_times = sample_times
+class LSTM(nn.LSTM):
+    def __init__(self, *args, dropouti: float = 0., dropoutw: float = 0., dropouto: float = 0.,
+                 batch_first=True, unit_forget_bias=True, **kwargs):
+        super().__init__(*args, **kwargs, batch_first=batch_first)
+        self.unit_forget_bias = unit_forget_bias
+        self.dropoutw = dropoutw
+        self.input_drop = VariationalDropout(dropouti, batch_first=batch_first)
+        self.output_drop = VariationalDropout(
+            dropouto, batch_first=batch_first)
+        self._init_weights()
 
-#         self.embedding = nn.Embedding(num_class, embedding_dim)
+    def _init_weights(self):
+        """
+        Use orthogonal init for recurrent layers, xavier uniform for input layers.
+        Bias is 0 except for forget gate.
+        """
+        for name, param in self.named_parameters():
+            if "weight_hh" in name:
+                nn.init.orthogonal_(param.data)
+            elif "weight_ih" in name:
+                nn.init.xavier_uniform_(param.data)
+            elif "bias" in name and self.unit_forget_bias:
+                nn.init.zeros_(param.data)
+                param.data[self.hidden_size:2 * self.hidden_size] = 1
 
-#         self.lstm = nn.LSTM(input_size=1+cov_dim+embedding_dim,
-#                             hidden_size=lstm_hidden_dim,
-#                             num_layers=lstm_layers,
-#                             bias=True,
-#                             batch_first=False,
-#                             dropout=lstm_dropout)
+    def _drop_weights(self):
+        for name, param in self.named_parameters():
+            if "weight_hh" in name:
+                param.data = F.dropout(
+                    param.data, p=self.dropoutw, training=self.training).contiguous()
 
-#         # initialize LSTM forget gate bias to be 1 as recommended by http://proceedings.mlr.press/v37/jozefowicz15.pdf
-#         for names in self.lstm._all_weights:
-#             for name in filter(lambda n: "bias" in n, names):
-#                 bias = getattr(self.lstm, name)
-#                 n = bias.size(0)
-#                 start, end = n // 4, n // 2
-#                 bias.data[start:end].fill_(1.)
+    def forward(self, input, hx=None):
+        self._drop_weights()
+        input = self.input_drop(input)
+        seq, state = super().forward(input, hx=hx)
+        return self.output_drop(seq), state
 
-#         self.relu = nn.ReLU()
-#         self.distribution_mu = nn.Linear(lstm_hidden_dim * lstm_layers, 1)
-#         self.distribution_presigma = nn.Linear(
-#             lstm_hidden_dim * lstm_layers, 1)
-#         self.distribution_sigma = nn.Softplus()
-
-#     def forward(self, x, idx, hidden, cell):
-#         '''
-#         Predict mu and sigma of the distribution for z_t.
-#         Args:
-#             x: ([1, batch_size, 1+cov_dim]): z_{t-1} + x_t, note that z_0 = 0
-#             idx ([1, batch_size]): one integer denoting the time series id
-#             hidden ([lstm_layers, batch_size, lstm_hidden_dim]): LSTM h from time step t-1
-#             cell ([lstm_layers, batch_size, lstm_hidden_dim]): LSTM c from time step t-1
-#         Returns:
-#             mu ([batch_size]): estimated mean of z_t
-#             sigma ([batch_size]): estimated standard deviation of z_t
-#             hidden ([lstm_layers, batch_size, lstm_hidden_dim]): LSTM h from time step t
-#             cell ([lstm_layers, batch_size, lstm_hidden_dim]): LSTM c from time step t
-#         '''
-#         onehot_embed = self.embedding(idx)
-#         lstm_input = torch.cat((x, onehot_embed), dim=2)
-#         output, (hidden, cell) = self.lstm(lstm_input, (hidden, cell))
-#         # use h from all three layers to calculate mu and sigma
-#         hidden_permute = hidden.permute(
-#             1, 2, 0).contiguous().view(hidden.shape[1], -1)
-#         pre_sigma = self.distribution_presigma(hidden_permute)
-#         mu = self.distribution_mu(hidden_permute)
-#         # softplus to make sure standard deviation is positive
-#         sigma = self.distribution_sigma(pre_sigma)
-#         return torch.squeeze(mu), torch.squeeze(sigma), hidden, cell
-
-#     def init_hidden(self, input_size):
-#         return torch.zeros(self.lstm_layers, input_size, self.lstm_hidden_dim, device=self.device)
-
-#     def init_cell(self, input_size):
-#         return torch.zeros(self.lstm_layers, input_size, self.lstm_hidden_dim, device=self.device)
-
-#     def test(self, x, v_batch, id_batch, hidden, cell, sampling=False):
-#         batch_size = x.shape[1]
-#         if sampling:
-#             samples = torch.zeros(self.sample_times, batch_size, self.predict_steps,
-#                                   device=self.device)
-#             for j in range(self.sample_times):
-#                 decoder_hidden = hidden
-#                 decoder_cell = cell
-#                 for t in range(self.predict_steps):
-#                     mu_de, sigma_de, decoder_hidden, decoder_cell = self(x[self.predict_start + t].unsqueeze(0),
-#                                                                          id_batch, decoder_hidden, decoder_cell)
-#                     gaussian = torch.distributions.normal.Normal(
-#                         mu_de, sigma_de)
-#                     pred = gaussian.sample()  # not scaled
-#                     samples[j, :, t] = pred * v_batch[:, 0] + v_batch[:, 1]
-#                     if t < (self.predict_steps - 1):
-#                         x[self.predict_start + t + 1, :, 0] = pred
-
-#             sample_mu = torch.median(samples, dim=0)[0]
-#             sample_sigma = samples.std(dim=0)
-#             return samples, sample_mu, sample_sigma
-
-#         else:
-#             decoder_hidden = hidden
-#             decoder_cell = cell
-#             sample_mu = torch.zeros(
-#                 batch_size, self.predict_steps, device=self.device)
-#             sample_sigma = torch.zeros(
-#                 batch_size, self.predict_steps, device=self.device)
-#             for t in range(self.predict_steps):
-#                 mu_de, sigma_de, decoder_hidden, decoder_cell = self(x[self.predict_start + t].unsqueeze(0),
-#                                                                      id_batch, decoder_hidden, decoder_cell)
-#                 sample_mu[:, t] = mu_de * v_batch[:, 0] + v_batch[:, 1]
-#                 sample_sigma[:, t] = sigma_de * v_batch[:, 0]
-#                 if t < (self.predict_steps - 1):
-#                     x[self.predict_start + t + 1, :, 0] = mu_de
-#             return sample_mu, sample_sigma
-
-
-# def loss_fn(mu: Variable, sigma: Variable, labels: Variable):
-#     '''
-#     Compute using gaussian the log-likehood which needs to be maximized. Ignore time steps where labels are missing.
-#     Args:
-#         mu: (Variable) dimension [batch_size] - estimated mean at time step t
-#         sigma: (Variable) dimension [batch_size] - estimated standard deviation at time step t
-#         labels: (Variable) dimension [batch_size] z_t
-#     Returns:
-#         loss: (Variable) average log-likelihood loss across the batch
-#     '''
-#     zero_index = (labels != 0)
-#     distribution = torch.distributions.normal.Normal(
-#         mu[zero_index], sigma[zero_index])
-#     likelihood = distribution.log_prob(labels[zero_index])
-#     return -torch.mean(likelihood)
+# Updated DeepAR model that now incorporates an embedding layer.
 
 
 class DeepAR(nn.Module):
-    def __init__(self, covariate_size, hidden_size, num_layers, dropout=0.0):
+    def __init__(self,
+                 num_class: int = 100,
+                 embedding_dim: int = 32,
+                 covariate_size: int = 4,
+                 hidden_size: int = 128,
+                 num_layers: int = 3,
+                 dropout: float = 0.0):
         """
-        covariate_size: number of exogenous features at each time step.
-        hidden_size: number of hidden units in the LSTM.
-        num_layers: number of LSTM layers.
-        dropout: dropout probability applied via variational dropout on LSTM outputs.
+        Args:
+          num_class: Number of distinct time series identifiers.
+          embedding_dim: Dimensionality of the embedding vectors.
+          covariate_size: Number of exogenous features per time step.
+          hidden_size: Number of hidden units in the LSTM.
+          num_layers: Number of LSTM layers.
+          dropout: Dropout probability applied via variational dropout.
         """
         super(DeepAR, self).__init__()
-        self.input_size = 1 + covariate_size
+        self.num_class = num_class
+        self.embedding_dim = embedding_dim
+        self.covariate_size = covariate_size
         self.hidden_size = hidden_size
         self.num_layers = num_layers
+        # The input now is composed of: previous target (1) + covariates + embedding.
+        self.input_size = 1 + covariate_size + embedding_dim
 
-        self.lstm = nn.LSTM(self.input_size, hidden_size, num_layers)
+        # Create the embedding layer for time series id.
+        self.embedding = nn.Embedding(num_class, embedding_dim)
 
-        self.var_dropout = VariationalDropout(
-            dropout=dropout, batch_first=False)
+        # Use our custom LSTM that applies variational dropout.
+        self.lstm = LSTM(self.input_size, hidden_size,
+                         num_layers, dropouti=dropout, batch_first=False)
+
+        # A linear layer to predict distribution parameters (mean and pre-sigma).
         self.fc = nn.Linear(hidden_size, 2)
 
-    def forward(self, target, covariates, mask):
+    def forward(self, target, covariates, mask, idx: Optional[torch.Tensor] = None):
         """
         Args:
           target: Tensor of shape (batch, seq_len) containing target values.
           covariates: Tensor of shape (batch, seq_len, covariate_size) containing covariate features.
-          mask: Boolean Tensor of shape (batch, seq_len). True indicates the target is observed;
-                False indicates the target is missing (to be filled with a sample).
+          mask: Boolean Tensor of shape (batch, seq_len) with True for observed data.
+          idx: Optional tensor of shape (1, batch) containing time series ids.
+               If not provided, defaults to a range [0, batch_size-1].
 
         Returns:
           loss: Scalar tensor, the average negative log likelihood computed over observed steps.
@@ -253,36 +134,49 @@ class DeepAR(nn.Module):
         batch_size, seq_len = target.size()
         device = target.device
 
+        # If no ids are provided, assign each sample an id equal to its index.
+        if idx is None:
+            idx = torch.arange(batch_size, device=device).unsqueeze(
+                0)  # shape: (1, batch)
+
+        # Initialize LSTM hidden and cell states.
         h = torch.zeros(self.num_layers, batch_size,
                         self.hidden_size, device=device)
         c = torch.zeros(self.num_layers, batch_size,
                         self.hidden_size, device=device)
 
+        # Initial autoregressive input: zeros.
         input_prev = torch.zeros(batch_size, 1, device=device)
 
         total_loss = 0.0
         count = 0
         predictions = []
 
+        # Unroll over the time sequence.
         for t in range(seq_len):
+            # Extract covariates at time t.
+            cov_t = covariates[:, t]  # shape: (batch, covariate_size)
+            # Obtain the embedding for each sample.
+            # Note: The same id is used for all time steps of a given sample.
+            emb = self.embedding(idx)  # shape: (1, batch, embedding_dim)
+            # Concatenate previous target, current covariates, and embedding.
+            # input_prev: (batch, 1); cov_t: (batch, covariate_size); emb.squeeze(0): (batch, embedding_dim)
+            # shape: (batch, 1+covariate_size+embedding_dim)
+            lstm_in = torch.cat([input_prev, cov_t, emb.squeeze(0)], dim=1)
+            lstm_in = lstm_in.unsqueeze(0)  # shape: (1, batch, input_size)
 
-            cov_t = covariates[:, t]
-
-            # shape: (batch, 1 + covariate_size)
-            lstm_in = torch.cat([input_prev, cov_t], dim=1)
-            # shape: (seq_len, batch, input_size); here seq_len=1.
-            lstm_in = lstm_in.unsqueeze(0)
-
+            # Pass through the LSTM.
             out, (h, c) = self.lstm(lstm_in, (h, c))
-            out = self.var_dropout(out)
-            out = out.squeeze(0)
+            out = out.squeeze(0)  # shape: (batch, hidden_size)
 
+            # Predict distribution parameters.
             params = self.fc(out)  # shape: (batch, 2)
             mean = params[:, 0]    # predicted mean
-            sigma = F.softplus(params[:, 1]) + 1e-6
+            sigma = F.softplus(params[:, 1]) + 1e-6  # ensure positivity
 
             predictions.append((mean, sigma))
 
+            # Compute negative log likelihood only for observed time steps.
             z_t = target[:, t]
             observed = mask[:, t]
             if observed.sum() > 0:
@@ -294,10 +188,16 @@ class DeepAR(nn.Module):
                 total_loss += nll.mean()
                 count += 1
 
+            # For autoregressive prediction: use true value if observed, else sample.
             sample = mean + sigma * torch.randn_like(mean)
             next_input = torch.where(observed, z_t, sample)
-            input_prev = next_input.unsqueeze(1)
+            input_prev = next_input.unsqueeze(1)  # shape: (batch, 1)
 
         loss = total_loss / count if count > 0 else total_loss
-
         return loss, predictions
+
+    def init_hidden(self, batch_size):
+        return torch.zeros(self.num_layers, batch_size, self.hidden_size, device=self.embedding.weight.device)
+
+    def init_cell(self, batch_size):
+        return torch.zeros(self.num_layers, batch_size, self.hidden_size, device=self.embedding.weight.device)

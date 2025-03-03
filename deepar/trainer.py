@@ -11,9 +11,9 @@ from torch import nn
 import torch.optim as optim
 from torch.utils.data.sampler import RandomSampler
 from tqdm import tqdm
-
+import itertools
 import utils
-from .model import Net, loss_fn
+from .model import DeepAR
 
 from metrics import compute_metrics
 # from evaluate import evaluate
@@ -221,11 +221,11 @@ class DeepARTrainer:
         for batch in self.train_loader:
 
             # Shape: (batch_size, seq_len)
-            targets = batch['target'].to(self.device)
+            targets = batch[0].to(self.device)
             # Shape: (batch_size, seq_len, covariate_size)
-            covariates = batch['covariates'].to(self.device)
+            covariates = batch[1].to(self.device)
             # Shape: (batch_size, seq_len)
-            mask = batch['mask'].to(self.device)
+            mask = batch[2].to(self.device)
 
             self.optimizer.zero_grad()
             loss, _ = self.model(targets, covariates, mask)
@@ -241,9 +241,9 @@ class DeepARTrainer:
         total_loss = 0.0
         with torch.no_grad():
             for batch in self.val_loader:
-                targets = batch['target'].to(self.device)
-                covariates = batch['covariates'].to(self.device)
-                mask = batch['mask'].to(self.device)
+                targets = batch[0].to(self.device)
+                covariates = batch[1].to(self.device)
+                mask = batch[2].to(self.device)
 
                 loss, _ = self.model(targets, covariates, mask)
                 total_loss += loss.item()
