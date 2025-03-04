@@ -84,6 +84,9 @@ class PriorWeightDistributionTemplate(nn.Module):
     def log_prior(self, w):
         raise NotImplementedError
 
+    def fit_params_to_data(self, data: torch.Tensor):
+        raise NotImplementedError
+
 
 class PriorWeightGMM(PriorWeightDistributionTemplate):
     def __init__(self, proportions: torch.Tensor, stds: torch.Tensor, locs: torch.Tensor = None):
@@ -116,6 +119,22 @@ class PriorWeightGMM(PriorWeightDistributionTemplate):
             torch.exp(log_probs - max_log_prob.unsqueeze(0)), dim=0))
 
         return log_sum.sum()
+
+    def fit_params_to_data(self, data):
+        """
+        Fit GMM parameters using simple moment matching
+        """
+        # Compute empirical mean and std
+        mean = data.mean()
+        std = data.std()
+
+        # For simplicity, adjust the means and stds while keeping proportions fixed
+        self.MU = torch.tensor([mean + i*std/self.N for i in range(self.N)])
+        self.SIGMA = torch.tensor([std for _ in range(self.N)])
+
+        # Update distributions
+        self.dists = [torch.distributions.Normal(
+            loc=self.MU[i], scale=self.SIGMA[i]) for i in range(self.N)]
 
 
 class PriorWeightGaussian(PriorWeightGMM):
@@ -150,6 +169,32 @@ class PriorWeightTMM(PriorWeightDistributionTemplate):
 
         return log_sum.sum()
 
+    def fit_params_to_data(self, data):
+        """
+        Fit Student-t mixture parameters using moment matching
+        """
+        # Compute empirical statistics
+        mean = data.mean()
+        std = data.std()
+
+        # For each component, adjust location and scale
+        for i in range(self.N):
+            # Adjust location parameter
+            self.MU[i] = mean + i*std/self.N
+
+            # Adjust scale parameter based on degrees of freedom
+            # For Student-t, variance = (nu/(nu-2))*sigma^2 when nu > 2
+            # So sigma = std * sqrt((nu-2)/nu)
+            nu = self.NU[i]
+            if nu > 2:
+                self.SIGMA[i] = std * torch.sqrt((nu-2)/nu)
+            else:
+                self.SIGMA[i] = std
+
+        # Update distributions
+        self.dists = [torch.distributions.StudentT(
+            df=self.NU[i], loc=self.MU[i], scale=self.SIGMA[i]) for i in range(self.N)]
+
 
 class PriorWeightStudentT(PriorWeightTMM):
     def __init__(self, nu=3, mu=0.0, sigma=1.0):
@@ -161,13 +206,74 @@ class PriorWeightStudentT(PriorWeightTMM):
         )
 
 
-# class PriorWeightStudentT(nn.Module):
-#     def __init__(self, nu=3, mu=0.0, sigma=1.0):
-#         super(PriorWeightStudentT, self).__init__()
-#         self.nu = nu
-#         self.mu = mu
-#         self.sigma = sigma
-#         self.dist = torch.distributions.StudentT(df=nu, loc=mu, scale=sigma)
+class PriorWeightPhaseType(PriorWeightDistributionTemplate):
+    def __init__(self, S: torch.Tensor, alpha: torch.Tensor):
+        super().__init__()
+        self.S = S  # Sub-intensity matrix
+        assert S.shape[-1] == S.shape[-2]
 
-#     def log_prior(self, w):
-#         return self.dist.log_prob(w).sum()
+        self.alpha = alpha  # Initial distribution
+        assert alpha.sum() == 1
+
+        self.s = -S.sum(dim=1)  # Exit rates vector
+
+    def log_prior(self, w):
+        w_flat = w.flatten()
+        log_probs = []
+
+        for wi in w_flat:
+            exp_Sw = torch.matrix_exp(self.S * wi)
+            density = self.alpha @ exp_Sw @ self.s
+            log_probs.append(torch.log(density))
+
+        log_probs = torch.stack(log_probs)
+        return log_probs.sum()
+
+    def fit_params_to_data(self, data: torch.Tensor):
+        """
+        Fit phase-type distribution parameters (S matrix and alpha vector) to data using EM algorithm.
+
+        Args:
+            data: Tensor of observations to fit the distribution to
+
+        Note: This is a simplified implementation - a full EM algorithm for phase-type
+        distributions is quite complex and computationally intensive.
+        """
+        # Ensure data is positive
+        if (data <= 0).any():
+            raise ValueError(
+                "Phase-type distributions are only defined for positive values")
+
+        n = self.S.shape[0]  # Number of phases
+
+        # Initialize parameters if not already set
+        if not hasattr(self, 'S') or not hasattr(self, 'alpha'):
+            # Lower triangular structure
+            self.S = torch.tril(torch.randn(n, n))
+            self.alpha = torch.softmax(torch.randn(n), dim=0)
+
+        # Simple moment matching for mean
+        empirical_mean = data.mean()
+
+        # For phase-type distributions:
+        # mean = alpha @ (-S)^(-1) @ 1
+        # We can use this to scale S appropriately
+        current_mean = self.alpha @ torch.linalg.inv(-self.S) @ torch.ones(n)
+        scale_factor = empirical_mean / current_mean
+
+        # Scale S to match the empirical mean
+        self.S = self.S / scale_factor
+
+        # Recompute exit rates
+        self.s = -self.S.sum(dim=1)
+
+    # class PriorWeightStudentT(nn.Module):
+    #     def __init__(self, nu=3, mu=0.0, sigma=1.0):
+    #         super(PriorWeightStudentT, self).__init__()
+    #         self.nu = nu
+    #         self.mu = mu
+    #         self.sigma = sigma
+    #         self.dist = torch.distributions.StudentT(df=nu, loc=mu, scale=sigma)
+
+    #     def log_prior(self, w):
+    #         return self.dist.log_prob(w).sum()

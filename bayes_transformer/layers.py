@@ -14,8 +14,7 @@ class BayesianLinear(nn.Module):
                  prior_sigma_2=0.4,
                  prior_pi=1,
                  posterior_mu_init=0,
-                 posterior_rho_init=-7.0,
-                 prior_dist=None):
+                 posterior_rho_init=-7.0):
         super().__init__()
 
         self.in_features = in_features
@@ -26,7 +25,7 @@ class BayesianLinear(nn.Module):
         self.prior_sigma_1 = prior_sigma_1
         self.prior_sigma_2 = prior_sigma_2
         self.prior_pi = prior_pi
-        self.prior_dist = prior_dist
+        # self.prior_dist = prior_dist
 
         print('HERE2:', type(self.prior_dist))
         self.weight_mu = nn.Parameter(torch.Tensor(
@@ -54,7 +53,7 @@ class BayesianLinear(nn.Module):
         self.log_prior = 0
         self.log_variational_posterior = 0
 
-    def forward(self, x):
+    def forward(self, x, prior_dist=None):
         w = self.weight_sampler.sample()
 
         if self.bias:
@@ -69,7 +68,7 @@ class BayesianLinear(nn.Module):
 
         self.log_variational_posterior = self.weight_sampler.log_posterior() + \
             b_log_posterior
-        self.log_prior = self.prior_dist.log_prior(w) + b_log_prior
+        self.log_prior = prior_dist.log_prior(w) + b_log_prior
 
         if len(x.shape) == 3:
             batch_size, seq_len, _ = x.shape

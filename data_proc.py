@@ -6,7 +6,6 @@ from torch.utils.data import Dataset, TensorDataset, DataLoader
 from datetime import datetime
 import os
 
-
 """Data processing that runs on the cleaned dataset. Some elements are hard-coded."""
 
 
@@ -142,7 +141,6 @@ class TransformSequence(DataTransform):
         x = x.clone()
         for t in self.transforms:
             x = t.transform(x)
-
         return x
 
     def reverse(self, transformed: torch.Tensor):
@@ -174,7 +172,6 @@ def formPairs(
     N = x_tensor.shape[0]
     x_start = x_start_hour - 1
     X, Y = [], []
-
     while (x_start + x_window + x_y_gap + y_window) < N:
         x = x_tensor[x_start: x_start + x_window, :]
         y = y_tensor[x_start + x_window + x_y_gap:
@@ -182,10 +179,53 @@ def formPairs(
         X.append(x)
         Y.append(y)
         x_start += step_size
-
     X = torch.stack(X)  # Shape: [num_samples, x_window, num_features]
-    Y = torch.stack(Y)  # Shape: [num_samples, y_window, num_features]
+    Y = torch.stack(Y)  # Shape: [num_samples, y_window]
     return X, Y
+
+
+def formPairsAR(
+        x_tensor: torch.Tensor,
+        x_start_hour: int = 9,
+        x_y_gap: int = 15,
+        x_window: int = 168,
+        y_window: int = 24,
+        step_size: int = 24):
+    """
+    For autoregressive training of DeepAR.
+    Returns:
+      target_seq: Tensor of shape [num_samples, x_window+y_window] (first column of the combined sequence)
+      covariate_seq: Tensor of shape [num_samples, x_window+y_window, num_features-1]
+                      (all features except the target column)
+      mask_seq: Boolean tensor of shape [num_samples, x_window+y_window] with True for observed (conditioning) and
+                False for forecast period.
+    """
+    N = x_tensor.shape[0]
+    num_features = x_tensor.shape[1]
+    x_start = x_start_hour - 1
+    targets, covariates, masks = [], [], []
+    while (x_start + x_window + x_y_gap + y_window) < N:
+        # shape (x_window, num_features)
+        x_obs = x_tensor[x_start: x_start + x_window, :]
+        x_fore = x_tensor[x_start + x_window + x_y_gap: x_start +
+                          # shape (y_window, num_features)
+                          x_window + x_y_gap + y_window, :]
+        # shape (x_window+y_window, num_features)
+        combined = torch.cat([x_obs, x_fore], dim=0)
+        targets.append(combined[:, 0]) 
+        covariates.append(combined[:, 1:]) 
+        mask = torch.cat([torch.ones(x_window, dtype=torch.bool),
+                          torch.zeros(y_window, dtype=torch.bool)], dim=0)
+        masks.append(mask)
+        x_start += step_size
+
+    # Shape: [num_samples, x_window+y_window]
+    target_seq = torch.stack(targets)
+    # Shape: [num_samples, x_window+y_window, num_features-1]
+    covariate_seq = torch.stack(covariates)
+    # Shape: [num_samples, x_window+y_window]
+    mask_seq = torch.stack(masks)
+    return target_seq, covariate_seq, mask_seq
 
 
 def benchmark_preprocess(
@@ -201,11 +241,15 @@ def benchmark_preprocess(
         step_size: int = 24,
         batch_size: int = 64,
         num_workers: int = 1,
-        train_transforms=[StandardScaleNorm(device='cpu')]):
+        train_transforms=[StandardScaleNorm(device='cpu')],
+        ar_model: bool = False):
     """
-    Loads the cleaned CSV data and performs time‐series splitting, transformation,
+    Loads the cleaned CSV data and performs time-series splitting, transformation,
     windowing (pair formation), and creation of DataLoaders. The datasets and loaders
     are saved with a suffix indicating if the data is spatial or non-spatial.
+
+    If 'ar_model' is True, the function creates datasets and loaders suitable for the DeepAR model,
+    which returns for each sample a tuple of (target, covariates, mask).
 
     Returns the list of fitted transform objects.
     """
@@ -236,28 +280,43 @@ def benchmark_preprocess(
     train_tensor = torch.tensor(train_df.to_numpy(), device=device).float()
     val_tensor = torch.tensor(val_df.to_numpy(), device=device).float()
     test_tensor = torch.tensor(test_df.to_numpy(), device=device).float()
+
     if spatial:
         for t in train_transforms:
             t.change_transform_cols(12)
     else:
         for t in train_transforms:
             t.change_transform_cols(3)
-    print(train_tensor)
+
     for t in train_transforms:
         t.fit(train_tensor.unsqueeze(0).to(device))
         train_tensor = t.transform(train_tensor)
-        print(train_tensor)
 
-    X_train, Y_train = formPairs(
-        train_tensor, train_tensor, x_start_hour, x_y_gap, x_window, y_window, step_size)
-    X_val, Y_val = formPairs(
-        val_tensor, val_tensor, x_start_hour, x_y_gap, x_window, y_window, step_size)
-    X_test, Y_test = formPairs(
-        test_tensor, test_tensor, x_start_hour, x_y_gap, x_window, y_window, step_size)
+    suffix = "spatial" if spatial else "non_spatial"
+    if ar_model:
+        suffix = f"{suffix}_AR"
 
-    train_dataset = TensorDataset(X_train, Y_train)
-    val_dataset = TensorDataset(X_val, Y_val)
-    test_dataset = TensorDataset(X_test, Y_test)
+        X_train_target, X_train_cov, X_train_mask = formPairsAR(
+            train_tensor, x_start_hour, x_y_gap, x_window, y_window, step_size)
+        X_val_target, X_val_cov, X_val_mask = formPairsAR(
+            val_tensor, x_start_hour, x_y_gap, x_window, y_window, step_size)
+        X_test_target, X_test_cov, X_test_mask = formPairsAR(
+            test_tensor, x_start_hour, x_y_gap, x_window, y_window, step_size)
+
+        train_dataset = TensorDataset(
+            X_train_target, X_train_cov, X_train_mask)
+        val_dataset = TensorDataset(X_val_target, X_val_cov, X_val_mask)
+        test_dataset = TensorDataset(X_test_target, X_test_cov, X_test_mask)
+    else:
+        X_train, Y_train = formPairs(
+            train_tensor, train_tensor, x_start_hour, x_y_gap, x_window, y_window, step_size)
+        X_val, Y_val = formPairs(
+            val_tensor, val_tensor, x_start_hour, x_y_gap, x_window, y_window, step_size)
+        X_test, Y_test = formPairs(
+            test_tensor, test_tensor, x_start_hour, x_y_gap, x_window, y_window, step_size)
+        train_dataset = TensorDataset(X_train, Y_train)
+        val_dataset = TensorDataset(X_val, Y_val)
+        test_dataset = TensorDataset(X_test, Y_test)
 
     pin_memory = True if device == 'cuda' else False
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
@@ -267,7 +326,6 @@ def benchmark_preprocess(
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False,
                              num_workers=num_workers, pin_memory=pin_memory)
 
-    suffix = "spatial" if spatial else "non_spatial"
     print(f"{suffix} Train loader shape: {next(iter(train_loader))[0].shape}")
     print(f"{suffix} Val loader shape: {next(iter(val_loader))[0].shape}")
     print(f"{suffix} Test loader shape: {next(iter(test_loader))[0].shape}")
@@ -286,7 +344,6 @@ def benchmark_preprocess(
     torch.save(val_loader, os.path.join(output_dir, f"val_loader_{suffix}.pt"))
     torch.save(test_loader, os.path.join(
         output_dir, f"test_loader_{suffix}.pt"))
-
     torch.save(train_transforms, os.path.join(
         output_dir, f"transforms_{suffix}.pt"))
 
@@ -297,8 +354,16 @@ if __name__ == "__main__":
     device = 'cpu'
     if torch.cuda.is_available():
         device = 'cuda'
-
     device = torch.device(device)
 
-    spatial_transforms = benchmark_preprocess(spatial=True, device=device)
-    non_spatial_transforms = benchmark_preprocess(spatial=False, device=device)
+    # For non-AR models
+    spatial_transforms = benchmark_preprocess(
+        spatial=True, device=device, ar_model=False)
+    non_spatial_transforms = benchmark_preprocess(
+        spatial=False, device=device, ar_model=False)
+
+    # For AR models
+    spatial_transforms = benchmark_preprocess(
+        spatial=True, device=device, ar_model=True)
+    non_spatial_transforms = benchmark_preprocess(
+        spatial=False, device=device, ar_model=True)
