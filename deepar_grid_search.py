@@ -5,6 +5,7 @@ import argparse
 
 from deepar.model import DeepAR
 from deepar.trainer import DeepARTrainer, grid_search
+from data_proc import StandardScaleNorm, MinMaxNorm
 
 
 def main(spatial='spatial'):
@@ -18,11 +19,11 @@ def main(spatial='spatial'):
     # For convenience, we now load the saved loaders from disk.
     # The suffix will be "spatial_AR" if spatial is True; otherwise "non_spatial_AR".
     suffix = "spatial_AR" if spatial else "non_spatial_AR"
-
+    savename = "deepar_best_model_spatial" if spatial else "deepar_best_model_non_spatial"
     # First, call benchmark_preprocess() to process and save the data.
     # (Note: benchmark_preprocess() returns the fitted transforms; the loaders are saved on disk.)
-    transforms = torch.load
-
+    transforms = torch.load(os.path.join(
+        "data", suffix, f"transforms_{suffix}.pt"))
     # Load the saved data loaders.
     train_loader = torch.load(os.path.join(
         "data", suffix, f"train_loader_{suffix}.pt"))
@@ -57,7 +58,9 @@ def main(spatial='spatial'):
         train_loader,
         val_loader,
         device=device,
-        num_epochs=50
+        data_norm=transforms[0],
+        num_epochs=50,
+        savename=savename
     )
 
     # Print results.

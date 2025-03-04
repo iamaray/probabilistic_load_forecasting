@@ -21,7 +21,8 @@ def main(spatial='spatial'):
 
     # First, call benchmark_preprocess() to process and save the data.
     # (Note: benchmark_preprocess() returns the fitted transforms; the loaders are saved on disk.)
-    transforms = torch.load
+    transforms = torch.load(os.path.join(
+        "data", suffix, f"trainsforms_{suffix}"))
 
     # Load the saved data loaders.
     train_loader = torch.load(os.path.join(
@@ -43,12 +44,18 @@ def main(spatial='spatial'):
     covariate_dim = sample[1].shape[-1]
 
     # Define the hyperparameter grid.
-    hyperparameters = {
-        "covariate_size": [covariate_dim],
-        "hidden_size": [20, 40, 60],
-        "num_layers": [2],
-        "embedding_dim": [64],
-        "learning_rate": [1e-3]
+    spatial_hyperparameters = {
+        'covariate_size': 14,
+        'hidden_size': 20,
+        'num_layers': 2,
+        'embedding_dim': 64
+    }
+
+    non_spatial_hyperparameters = {
+        'covariate_size': 5,
+        'hidden_size': 40,
+        'num_layers': 2,
+        'embedding_dim': 32
     }
 
     # Run grid search.
@@ -59,12 +66,6 @@ def main(spatial='spatial'):
         device=device,
         num_epochs=50
     )
-
-    # Print results.
-    print("Grid search results:")
-    for config, loss in results:
-        print(f"Config: {config}, Val Loss: {loss:.4f}")
-    print(f"Best Config: {best_config} with loss {best_loss:.4f}")
 
 
 if __name__ == "__main__":

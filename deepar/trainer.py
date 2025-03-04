@@ -235,14 +235,17 @@ class DeepARTrainer:
             total_loss += loss.item()
         return total_loss / len(self.train_loader)
 
-    def validate_epoch(self):
+    def validate_epoch(self, data_norm):
         """Run one epoch of validation."""
         self.model.eval()
         total_loss = 0.0
+        data_norm.set_device(device=self.device)
         with torch.no_grad():
             for batch in self.val_loader:
-                targets = batch[0].to(self.device)
-                covariates = batch[1].to(self.device)
+                targets = data_norm.transform(
+                    transform_col=0, x=batch[0].unsqueeze(-1).to(self.device)).squeeze()
+                print('here', targets.shape)
+                covariates = data_norm.transform(batch[1].to(self.device))
                 mask = batch[2].to(self.device)
 
                 loss, _ = self.model(targets, covariates, mask)
@@ -262,7 +265,7 @@ class DeepARTrainer:
                     f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}")
 
 
-def grid_search(hyperparameter_grid, train_loader, val_loader, device='cpu', num_epochs=10):
+def grid_search(hyperparameter_grid, train_loader, val_loader, device='cpu', data_norm=None, num_epochs=10, savename='deepar_best_model_spatial'):
     """
     Performs a grid search over the hyperparameter grid for the DeepAR model.
 
@@ -305,9 +308,10 @@ def grid_search(hyperparameter_grid, train_loader, val_loader, device='cpu', num
             model, optimizer, train_loader, val_loader, device)
 
         for epoch in range(num_epochs):
-            trainer.train_epoch()
+            l = trainer.train_epoch()
+            print(f"Epoch {epoch+1}/{num_epochs}: {l}")
 
-        val_loss = trainer.validate_epoch()
+        val_loss = trainer.validate_epoch(data_norm=data_norm)
         print(f"Config {config} achieved validation loss: {val_loss:.4f}")
 
         results.append((config, val_loss))
@@ -318,4 +322,39 @@ def grid_search(hyperparameter_grid, train_loader, val_loader, device='cpu', num
 
     print(
         f"\nBest configuration: {best_config} with validation loss: {best_loss:.4f}")
+
+    # Train best model for additional 20 epochs
+    print("\nTraining best model for 20 additional epochs...")
+    best_model = DeepAR(covariate_size=best_config["covariate_size"],
+                        hidden_size=best_config["hidden_size"],
+                        num_layers=best_config["num_layers"],
+                        embedding_dim=best_config['embedding_dim'])
+    best_model = best_model.to(device)
+    best_optimizer = optim.Adam(
+        best_model.parameters(), lr=best_config["learning_rate"])
+    best_trainer = DeepARTrainer(
+        best_model, best_optimizer, train_loader, val_loader, device)
+
+    for epoch in range(num_epochs + 20):
+        train_loss = best_trainer.train_epoch()
+        val_loss = best_trainer.validate_epoch(data_norm=data_norm)
+        print(
+            f"Training best model -- Epoch {epoch+1}/{num_epochs + 20}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+
+    # Create modelsave directory if it doesn't exist
+    os.makedirs('modelsave', exist_ok=True)
+
+    # Save the model and hyperparameters
+    timestamp = utils.get_timestamp()
+    model_path = os.path.join('modelsave', f'{savename}.pt')
+    config_path = os.path.join(
+        'modelsave', f'{savename}_cfg.json')
+
+    torch.save(best_model.state_dict(), model_path)
+    with open(config_path, 'w') as f:
+        json.dump(best_config, f, indent=4)
+
+    print(f"\nBest model saved to: {model_path}")
+    print(f"Hyperparameters saved to: {config_path}")
+
     return best_config, best_loss, results
