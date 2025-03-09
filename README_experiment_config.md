@@ -4,7 +4,7 @@ This README explains how to use the experiment configuration feature for the Bay
 
 ## Overview
 
-The `bnn_prior_ablation.py` script now accepts an experiment configuration JSON file that allows you to customize various aspects of the experiments without modifying the code. This makes it easier to run different experiments with different parameters.
+The `bnn_prior_ablation.py` script handles experiments with the Bayesian transformer model that assess its performance under different prior distributions. As of now, this script ablates over Gaussian mixture models, Student's t mixture models, and Cauchy mixture models of varying mixture parameters. The scale and location parameters of each model are fit empirically over the training data. Also, for simplicity, we only grid search through 2 parameters: $n$ and $\nu$, where $n$ is the number of distributions in the mixture, and $\nu$ denotes the degrees of freedom of the Student's t model. Also, to impose no additional assumptions, the mixture proportions are uniform; that is, $\Pi = (1/n, 1/n, \dots, 1/n) \in \mathbb{R}^n$, and each component distribution is evenly spaced about the origin.
 
 ## Usage
 
