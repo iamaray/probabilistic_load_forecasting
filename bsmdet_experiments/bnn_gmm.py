@@ -1,16 +1,18 @@
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from data_proc import StandardScaleNorm, MinMaxNorm
+from bayes_transformer.distributions import PriorWeightGMM
+from bayes_transformer.model import BSMDeTWrapper
+import bnn_inference
+import bnn_single_model
 import json
 import torch
 import itertools
-import os
 from datetime import datetime
 import argparse
 
-import bnn_single_model
-import bnn_inference
-
-from bayes_transformer.model import BSMDeTWrapper
-from bayes_transformer.distributions import PriorWeightGMM
-from data_proc import StandardScaleNorm, MinMaxNorm
 
 
 def main(dist_params: dict, hyperparam_path, spatial_arg='non_spatial', device='cuda'):
@@ -27,7 +29,7 @@ def main(dist_params: dict, hyperparam_path, spatial_arg='non_spatial', device='
     hyperparams['prior'] = prior_dist
     print(type(hyperparams['prior']), hyperparams['prior'].PI)
 
-    save_suff = f"gmm_pi{dist_params['pi']}_std1{dist_params['std1']}_std2{dist_params['std2']}_mu2{dist_params['mu2']}"
+    save_suff = f"gmm_pi{dist_params['pi']}"
     model = BSMDeTWrapper(**hyperparams)
     print('HERE0:', model.prior.PI)
     trained_model = bnn_single_model.main(
@@ -74,14 +76,10 @@ if __name__ == "__main__":
                         help='Whether to use spatial features')
     args = parser.parse_args()
 
-    dist_param_grid = {'pi': [0.5, 0.7, 1],
-                       'std1': [1], 'std2': [0.3, 1.5, 2, 5], 'mu2': [-0.5, 0, 0.5]}
+    dist_param_grid = {'pi': [0.25, 0.5, 0.75, 1]}
 
-    param_combinations = [{'pi': pi, 'std1': s1, 'std2': s2, 'mu2': m2}
-                          for pi in dist_param_grid['pi']
-                          for s1 in dist_param_grid['std1']
-                          for s2 in dist_param_grid['std2']
-                          for m2 in dist_param_grid['mu2']]
+    param_combinations = [{'pi': pi}
+                          for pi in dist_param_grid['pi']]
 
     for params in param_combinations:
         print(f"\nRunning experiment with parameters: {params}")

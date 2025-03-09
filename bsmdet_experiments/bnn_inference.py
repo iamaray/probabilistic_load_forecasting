@@ -1,17 +1,21 @@
-from metrics import compute_metrics
-from final_data_prep import preprocess
-from bayes_transformer.model import BSMDeTWrapper
-from bayes_transformer.trainer import BayesTrainer
-import torch
-import json
-import argparse
-import numpy as np
-import pandas as pd
-import matplotlib
-from matplotlib import pyplot as plt
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from data_proc import StandardScaleNorm, MinMaxNorm, TransformSequence
 from datetime import datetime
-from data_proc import StandardScaleNorm, MinMaxNorm
+from matplotlib import pyplot as plt
+import matplotlib
+import pandas as pd
+import numpy as np
+import argparse
 import json
+import torch
+from bayes_transformer.trainer import BayesTrainer
+from bayes_transformer.model import BSMDeTWrapper
+from final_data_prep import preprocess
+from metrics import compute_metrics
+
 matplotlib.use('Agg')
 
 
@@ -60,7 +64,7 @@ def main(
 
     test_loader = torch.load(test_loader_path)
 
-    train_norm = torch.load(train_norm_path)[0]
+    train_norm = torch.load(train_norm_path)
     # print(train_norm)
     # if len(train_norm) == 1:
     #     train_norm = train_norm[0]
@@ -134,30 +138,30 @@ def main(
     }
 
 
-if __name__ == "__main__":
-    res = main(model_path='modelsave/bmdet/bmdet_spatial.pt',
-               test_loader_path='data/spatial/test_loader_spatial.pt',
-               train_norm_path='data/spatial/transforms_spatial.pt',
-               raw_csv_path='',
-               num_samples=20,
-               new_csv_savename='bmdet_output_stats.csv',
-               test_start_date=datetime(2024, 9, 1),
-               test_end_date=datetime(2025, 1, 6),
-               device='cpu',
-               plot_name='spatial')
+# if __name__ == "__main__":
+#     res = main(model_path='modelsave/bmdet/bmdet_spatial.pt',
+#                test_loader_path='data/spatial/test_loader_spatial.pt',
+#                train_norm_path='data/spatial/transforms_spatial.pt',
+#                raw_csv_path='',
+#                num_samples=20,
+#                new_csv_savename='bmdet_output_stats.csv',
+#                test_start_date=datetime(2024, 9, 1),
+#                test_end_date=datetime(2025, 1, 6),
+#                device='cpu',
+#                plot_name='spatial')
 
-    print(res)
+#     print(res)
 
-    res = main(model_path='modelsave/bmdet/bmdet_non_spatial.pt',
-               test_loader_path='data/non_spatial/test_loader_non_spatial.pt',
-               train_norm_path='data/non_spatial/transforms_non_spatial.pt',
-               raw_csv_path='',
-               num_samples=20,
-               new_csv_savename='bmdet_output_stats.csv',
-               test_start_date=datetime(2024, 9, 1),
-               test_end_date=datetime(2025, 1, 6),
-               device='cpu',
-               plot_name='non_spatial'
-               )
+#     res = main(model_path='modelsave/bmdet/bmdet_non_spatial.pt',
+#                test_loader_path='data/non_spatial/test_loader_non_spatial.pt',
+#                train_norm_path='data/non_spatial/transforms_non_spatial.pt',
+#                raw_csv_path='',
+#                num_samples=20,
+#                new_csv_savename='bmdet_output_stats.csv',
+#                test_start_date=datetime(2024, 9, 1),
+#                test_end_date=datetime(2025, 1, 6),
+#                device='cpu',
+#                plot_name='non_spatial'
+#                )
 
-    print(res)
+#     print(res)
