@@ -1,11 +1,13 @@
-from final_data_prep import preprocess
-from bayes_transformer.model import BSMDeTWrapper
-from bayes_transformer.trainer import BayesTrainer
-import torch
-import json
-import argparse
+import sys
 import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from data_proc import StandardScaleNorm, MinMaxNorm
+import argparse
+import json
+import torch
+from bayes_transformer.trainer import BayesTrainer
+from bayes_transformer.model import BSMDeTWrapper
 
 
 def main(
@@ -57,7 +59,8 @@ def main(
 
     for (x, y) in train_loader:
         print(x.shape, y.shape)
-
+        print(x.max(), x.min())
+        print(y.max(), y.min())
     device = torch.device(device)
 
     if model is None:

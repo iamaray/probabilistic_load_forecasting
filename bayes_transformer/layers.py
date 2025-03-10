@@ -27,7 +27,7 @@ class BayesianLinear(nn.Module):
         self.prior_pi = prior_pi
         # self.prior_dist = prior_dist
 
-        print('HERE2:', type(self.prior_dist))
+        # print('HERE2:', type(self.prior_dist))
         self.weight_mu = nn.Parameter(torch.Tensor(
             out_features, in_features).normal_(posterior_mu_init, 0.1))
         self.weight_rho = nn.Parameter(torch.Tensor(
@@ -59,7 +59,7 @@ class BayesianLinear(nn.Module):
         if self.bias:
             b = self.bias_sampler.sample()
             b_log_posterior = self.bias_sampler.log_posterior()
-            b_log_prior = self.prior_dist.log_prior(b)
+            b_log_prior = prior_dist.log_prior(b)
 
         else:
             b = torch.zeros((self.out_features), device=x.device)

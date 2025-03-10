@@ -1,3 +1,7 @@
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from bayes_transformer.model import BSMDeTWrapper
 from bayes_transformer.trainer import BayesTrainer
 from bayes_transformer.trainer import grid_search_torch_model

@@ -28,16 +28,17 @@ class MultiHeadedAttention(nn.Module):
         self.attn = None
         self.dropout = nn.Dropout(p=dropout)
 
-    def forward(self, query, key, value, prior=None):
+    def forward(self, query, key, value, prior_dist=None):
         nbatches = query.size(0)
         query, key, value = [
-            l(x, prior=prior).view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
+            l(x, prior_dist=prior_dist).view(
+                nbatches, -1, self.h, self.d_k).transpose(1, 2)
             for l, x in zip(self.linears, (query, key, value))
         ]
         x, self.attn = attention(query, key, value, dropout=self.dropout)
         x = x.transpose(1, 2).contiguous().view(
             nbatches, -1, self.h * self.d_k)
-        return self.linears[-1](x, prior=prior)
+        return self.linears[-1](x, prior_dist=prior_dist)
 
 
 def attention(query, key, value, dropout=None):
@@ -68,8 +69,8 @@ class SublayerConnection(nn.Module):
         self.norm = LayerNorm(size)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x, sublayer, prior=None):
-        return self.norm(x + self.dropout(sublayer(x, prior=prior)))
+    def forward(self, x, sublayer, prior_dist=None):
+        return self.norm(x + self.dropout(sublayer(x, prior_dist=prior_dist)))
 
 
 class PositionwiseFeedForward(nn.Module):
@@ -79,8 +80,8 @@ class PositionwiseFeedForward(nn.Module):
         self.w_2 = BayesianLinear(d_ff, d_model)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x, prior=None):
-        return self.w_2(self.dropout(F.relu(self.w_1(x, prior=prior))), prior=prior)
+    def forward(self, x, prior_dist=None):
+        return self.w_2(self.dropout(F.relu(self.w_1(x, prior_dist=prior_dist))), prior_dist=prior_dist)
 
 
 class EncoderLayer(nn.Module):
@@ -97,10 +98,10 @@ class EncoderLayer(nn.Module):
         self.sublayer = clones(SublayerConnection(
             size=d_model, dropout=dropout), N=N)
 
-    def forward(self, x, prior=None):
-        x = self.sublayer[0](x, lambda x, prior: self.self_attn(
-            x, x, x, prior=prior), prior=prior)
-        return self.sublayer[1](x, self.feed_forward, prior=prior)
+    def forward(self, x, prior_dist=None):
+        x = self.sublayer[0](x, lambda x, prior_dist: self.self_attn(
+            x, x, x, prior_dist=prior_dist), prior_dist=prior_dist)
+        return self.sublayer[1](x, self.feed_forward, prior_dist=prior_dist)
 
 
 class Encoder(nn.Module):
@@ -111,9 +112,9 @@ class Encoder(nn.Module):
         self.layers = clones(layer, N)
         self.norm = LayerNorm(layer.size)
 
-    def forward(self, x, prior=None):
+    def forward(self, x, prior_dist=None):
         for layer in self.layers:
-            x = layer(x, prior=prior)
+            x = layer(x, prior_dist=prior_dist)
         return self.norm(x)
 
 
@@ -130,7 +131,7 @@ class DecoderLayer(nn.Module):
         self.sublayer = clones(SublayerConnection(
             size=d_model, dropout=dropout), N=N)
 
-    def forward(self, memory, x, prior=None):
+    def forward(self, memory, x, prior_dist=None):
         m = memory
         N = len(self.sublayer)
 
@@ -143,22 +144,23 @@ class DecoderLayer(nn.Module):
             return self.sublayer[0](x, combined, prior=prior)
 
         elif N == 2:
-            x = self.sublayer[0](x, lambda x, prior: self.self_attn(
-                x, x, x, prior=prior), prior=prior)
+            x = self.sublayer[0](x, lambda x, prior_dist: self.self_attn(
+                x, x, x, prior_dist=prior_dist), prior_dist=prior_dist)
 
-            def combined(x, prior):
-                x = self.src_attn(x, m, m, prior=prior)
-                x = self.feed_forward(x, prior=prior)
+            def combined(x, prior_dist):
+                x = self.src_attn(x, m, m, prior_dist=prior_dist)
+                x = self.feed_forward(x, prior_dist=prior_dist)
                 return x
-            return self.sublayer[1](x, combined, prior=prior)
+            return self.sublayer[1](x, combined, prior_dist=prior_dist)
 
         else:
-            x = self.sublayer[0](x, lambda x, prior: self.self_attn(
-                x, x, x, prior=prior), prior=prior)
-            x = self.sublayer[1](x, lambda x, prior: self.src_attn(
-                x, m, m, prior=prior), prior=prior)
+            x = self.sublayer[0](x, lambda x, prior_dist: self.self_attn(
+                x, x, x, prior_dist=prior_dist), prior_dist=prior_dist)
+            x = self.sublayer[1](x, lambda x, prior_dist: self.src_attn(
+                x, m, m, prior_dist=prior_dist), prior_dist=prior_dist)
             for i in range(2, N):
-                x = self.sublayer[i](x, self.feed_forward, prior=prior)
+                x = self.sublayer[i](x, self.feed_forward,
+                                     prior_dist=prior_dist)
             return x
 
 
@@ -174,14 +176,14 @@ class Decoder(nn.Module):
         self.outputLinear1 = BayesianLinear(window_length, window_length)
         self.outputLinear2 = BayesianLinear(window_length, ahead)
 
-    def forward(self, memory, decoderINPUT, prior=None):
+    def forward(self, memory, decoderINPUT, prior_dist=None):
         for layer in self.layers:
-            memory = layer(memory, decoderINPUT, prior=prior)
+            memory = layer(memory, decoderINPUT, prior_dist=prior_dist)
 
-        x = self.outputLinear(self.norm(memory), prior=prior)
+        x = self.outputLinear(self.norm(memory), prior_dist=prior_dist)
         x = x.squeeze(-1)
-        x = self.outputLinear1(x, prior=prior)
-        return self.outputLinear2(x, prior=prior)
+        x = self.outputLinear1(x, prior_dist=prior_dist)
+        return self.outputLinear2(x, prior_dist=prior_dist)
 
 
 @variational_estimator
@@ -189,7 +191,7 @@ class BayesianMDeT(nn.Module):
     def __init__(self, ahead, num_targets, num_aux_feats, window_len, name="BSMDeT",
                  d_model=32, encoder_layers=2, encoder_d_ff=128, encoder_sublayers=2,
                  encoder_h=8, encoder_dropout=0.1, decoder_layers=2, decoder_dropout=0.1,
-                 decoder_h=8, decoder_d_ff=128, decoder_sublayers=3, prior: PriorWeightDistributionTemplate = None):
+                 decoder_h=8, decoder_d_ff=128, decoder_sublayers=3, prior_dist: PriorWeightDistributionTemplate = None):
         super(BayesianMDeT, self).__init__()
         self.name = name
         self.num_targets = num_targets
@@ -198,8 +200,8 @@ class BayesianMDeT(nn.Module):
         self.d_model = d_model
         num_feats = num_targets + num_aux_feats
 
-        self.prior = prior
-        print('HERE:', type(prior))
+        self.prior_dist = prior_dist
+        print('HERE:', type(prior_dist))
 
         self.encoderLinear = BayesianLinear(num_feats, d_model)
         self.encoder = self._build_encoder(encoder_layers, d_model, encoder_dropout,
@@ -230,16 +232,16 @@ class BayesianMDeT(nn.Module):
                        N=N, d_ff=d_ff)
 
     def forward(self, x: torch.Tensor):
-        self.prior.fit_params_to_data(data=x)
+        # self.prior_dist.fit_params_to_data(data=x)
         encoder_output = self.encoder(self.encoderLinear(
-            x, prior=self.prior), prior=self.prior)
+            x, prior_dist=self.prior_dist), prior_dist=self.prior_dist)
         aux = x[:, :, self.num_targets:]
         inputs = [torch.cat([x[:, :, i:i+1], aux], dim=2)
                   for i in range(self.num_targets)]
         outputs = [self.decoders[i](encoder_output,
                                     self.decoder_linear_layers[i](
-                                        inputs[i], prior=self.prior),
-                                    prior=self.prior)
+                                        inputs[i], prior_dist=self.prior_dist),
+                                    prior_dist=self.prior_dist)
                    for i in range(self.num_targets)]
         outputs = torch.cat(outputs, dim=-1)
         if len(outputs.shape) == 2:
@@ -252,7 +254,7 @@ class BSMDeTWrapper(nn.Module):
                  name="BSMDeT", d_model=32, encoder_layers=2, encoder_d_ff=128,
                  encoder_sublayers=2, encoder_h=8, encoder_dropout=0.1,
                  decoder_layers=2, decoder_dropout=0.1, decoder_h=8,
-                 decoder_d_ff=128, decoder_sublayers=3, lr=0.001, prior: PriorWeightDistributionTemplate = None,
+                 decoder_d_ff=128, decoder_sublayers=3, lr=0.001, prior_dist: PriorWeightDistributionTemplate = None,
                  pretrained_weights_path=None):
         super(BSMDeTWrapper, self).__init__()
         self.num_targets = num_targets
@@ -271,7 +273,7 @@ class BSMDeTWrapper(nn.Module):
         self.decoder_h = decoder_h
         self.decoder_d_ff = decoder_d_ff
         self.decoder_sublayers = decoder_sublayers
-        self.prior = prior
+        self.prior_dist = prior_dist
 
         self.create(lr=lr, pretrained_weights_path=pretrained_weights_path)
         self.grad_scaler = GradScaler()
@@ -294,7 +296,7 @@ class BSMDeTWrapper(nn.Module):
             decoder_h=self.decoder_h,
             decoder_d_ff=self.decoder_d_ff,
             decoder_sublayers=self.decoder_sublayers,
-            prior=self.prior
+            prior_dist=self.prior_dist
         )
         if pretrained_weights_path is not None:
             state_dict = torch.load(
@@ -338,6 +340,7 @@ class BSMDeTWrapper(nn.Module):
         x_test = in_test
         if force_cpu:
             self.model.to('cpu')
+            self.prior_dist.to('cpu')
             x_test = x_test.cpu()
             if scaler is not None:
                 scaler.set_device('cpu')

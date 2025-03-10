@@ -143,10 +143,10 @@ class TransformSequence(DataTransform):
             x = t.transform(x)
         return x
 
-    def reverse(self, transformed: torch.Tensor):
+    def reverse(self, transformed: torch.Tensor, reverse_col=0):
         x = transformed.clone()
         for t in reversed(self.transforms):
-            x = t.reverse(x)
+            x = t.reverse(x, reverse_col)
         return x
 
     def set_device(self, new_device):
@@ -212,8 +212,8 @@ def formPairsAR(
                           x_window + x_y_gap + y_window, :]
         # shape (x_window+y_window, num_features)
         combined = torch.cat([x_obs, x_fore], dim=0)
-        targets.append(combined[:, 0]) 
-        covariates.append(combined[:, 1:]) 
+        targets.append(combined[:, 0])
+        covariates.append(combined[:, 1:])
         mask = torch.cat([torch.ones(x_window, dtype=torch.bool),
                           torch.zeros(y_window, dtype=torch.bool)], dim=0)
         masks.append(mask)
@@ -233,7 +233,6 @@ def benchmark_preprocess(
         val_start_end=(datetime(2024, 7, 1), datetime(2024, 9, 1)),
         test_start_end=(datetime(2024, 9, 1), datetime(2025, 1, 6)),
         spatial=True,
-        device='cpu',
         x_start_hour: int = 9,
         x_y_gap: int = 15,
         x_window: int = 168,
@@ -253,7 +252,10 @@ def benchmark_preprocess(
 
     Returns the list of fitted transform objects.
     """
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     if train_transforms is None:
+        # train_transforms = [StandardScaleNorm(
+        #     device=device), MinMaxNorm(device=device)]
         train_transforms = [StandardScaleNorm(device=device)]
 
     csv_path = "data/ercot_data_cleaned.csv"
@@ -293,6 +295,13 @@ def benchmark_preprocess(
         train_tensor = t.transform(train_tensor)
 
     suffix = "spatial" if spatial else "non_spatial"
+
+    # Save train_tensor to its own file
+    output_dir = f"data/{suffix}"
+    os.makedirs(output_dir, exist_ok=True)
+    torch.save(train_tensor, os.path.join(
+        output_dir, f"train_tensor_{suffix}.pt"))
+
     if ar_model:
         suffix = f"{suffix}_AR"
 
@@ -344,26 +353,26 @@ def benchmark_preprocess(
     torch.save(val_loader, os.path.join(output_dir, f"val_loader_{suffix}.pt"))
     torch.save(test_loader, os.path.join(
         output_dir, f"test_loader_{suffix}.pt"))
-    torch.save(train_transforms, os.path.join(
-        output_dir, f"transforms_{suffix}.pt"))
 
+    if len(train_transforms) > 0:
+        train_transforms = TransformSequence(train_transforms, device)
+        torch.save(train_transforms, os.path.join(
+            output_dir, f"transforms_{suffix}.pt"))
+    else:
+        torch.save(train_transforms[0], os.path.join(
+            output_dir, f"transforms_{suffix}.pt"))
     return train_transforms
 
 
 if __name__ == "__main__":
-    device = 'cpu'
-    if torch.cuda.is_available():
-        device = 'cuda'
-    device = torch.device(device)
-
     # For non-AR models
     spatial_transforms = benchmark_preprocess(
-        spatial=True, device=device, ar_model=False)
+        spatial=True, ar_model=False, train_transforms=None)
     non_spatial_transforms = benchmark_preprocess(
-        spatial=False, device=device, ar_model=False)
+        spatial=False, ar_model=False, train_transforms=None)
 
     # For AR models
     spatial_transforms = benchmark_preprocess(
-        spatial=True, device=device, ar_model=True)
+        spatial=True, ar_model=True)
     non_spatial_transforms = benchmark_preprocess(
-        spatial=False, device=device, ar_model=True)
+        spatial=False, ar_model=True)
