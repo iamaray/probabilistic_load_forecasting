@@ -357,4 +357,4 @@ def grid_search(hyperparameter_grid, train_loader, val_loader, device='cpu', dat
     print(f"\nBest model saved to: {model_path}")
     print(f"Hyperparameters saved to: {config_path}")
 
-    return best_config, best_loss, results
+    return best_model, best_config, best_loss, results
