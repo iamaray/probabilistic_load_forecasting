@@ -395,23 +395,18 @@ class PriorWeightTMM(PriorWeightDistributionTemplate):
 
     def to(self, device):
         """Move all tensors to the specified device and recreate distributions"""
-        # Move all tensor attributes to the device
+
         if hasattr(self, 'PI') and self.PI is not None:
             self.PI = self.PI.to(device)
-
         if hasattr(self, 'NU') and self.NU is not None:
             self.NU = self.NU.to(device)
-
         if hasattr(self, 'SIGMA') and self.SIGMA is not None:
             self.SIGMA = self.SIGMA.to(device)
-
         if hasattr(self, 'MU') and self.MU is not None:
             self.MU = self.MU.to(device)
 
-        # Update the device attribute
         self.device = device
 
-        # Recreate the distributions with tensors on the new device
         if hasattr(self, 'dists') and hasattr(self, 'N'):
             self.dists = [torch.distributions.StudentT(
                 df=self.NU[i],
@@ -419,7 +414,6 @@ class PriorWeightTMM(PriorWeightDistributionTemplate):
                 scale=self.SIGMA[i])
                 for i in range(self.N)]
 
-        # Call the parent class's to() method
         return super().to(device)
 
 
@@ -501,8 +495,9 @@ class PriorWeightPhaseType(PriorWeightDistributionTemplate):
 
     def fit_params_to_data(self, data: torch.Tensor):
         # Ensure data is on the same device as the distribution parameters
-        if self.device is not None and data.device != self.device:
-            data = data.to(self.device)
+        device = self.get_param_device()
+        if data.device != device:
+            data = data.to(device)
 
         data = F.softplus(data)
 
@@ -524,15 +519,12 @@ class PriorWeightPhaseType(PriorWeightDistributionTemplate):
                 "No positive values in data after filtering zeros")
 
         n = self.S.shape[0]  # Number of phases
-        device = self.get_param_device()
 
         # Initialize parameters if not already set
         if not hasattr(self, 'S') or not hasattr(self, 'alpha'):
             # Lower triangular structure for S
-            self.S = torch.tril(torch.randn(
-                n, n, device=device))
-            self.alpha = torch.softmax(
-                torch.randn(n, device=device), dim=0)
+            self.S = torch.tril(torch.randn(n, n, device=device))
+            self.alpha = torch.softmax(torch.randn(n, device=device), dim=0)
             self.s = -self.S.sum(dim=1)
 
         # Sort data for numerical stability
@@ -551,54 +543,78 @@ class PriorWeightPhaseType(PriorWeightDistributionTemplate):
         # Create identity matrix for calculations
         I = torch.eye(n, device=device)
 
+        # Pre-compute regularization matrix
+        reg_eye = torch.eye(n, device=device) * 1e-6
+
+        # Batch processing parameters
+        batch_size = min(100, len(data))  # Process data in batches
+
         for iteration in range(max_iter):
             # E-step: Compute expected sufficient statistics
             B = torch.zeros((n, n), device=device)
             z = torch.zeros(n, device=device)
+            print(f"E-step: {iteration}")
 
             log_likelihood = 0.0
 
-            for x in data:
-                # Compute matrix exponential
-                exp_Sx = torch.matrix_exp(self.S * x)
+            # Process data in batches
+            for i in range(0, len(data), batch_size):
+                batch = data[i:i+batch_size]
 
-                # Compute density and log-likelihood
-                density = self.alpha @ exp_Sx @ self.s
-                log_likelihood += torch.log(density)
+                # Vectorized computation of matrix exponentials
+                exp_Sx_batch = torch.stack(
+                    [torch.matrix_exp(self.S * x) for x in batch])
+                print
+                # Compute densities and log-likelihoods for the batch
+                densities = torch.stack(
+                    [self.alpha @ exp_Sx @ self.s for exp_Sx in exp_Sx_batch])
+                log_likelihood += torch.log(densities).sum()
 
-                # Compute conditional expectations
-                # E[time spent in state i] for this observation
-                # Add regularization to avoid singular matrix
-                reg_matrix = -self.S + torch.eye(n, device=device) * 1e-6
+                # Compute conditional expectations for the batch
+                reg_matrix = -self.S + reg_eye
+
+                # Try solving the linear system for all observations in the batch
                 try:
-                    E_i = self.alpha @ torch.linalg.solve(
-                        reg_matrix,
-                        I - exp_Sx
-                    )
+                    # Vectorized computation for E_i
+                    E_i_batch = torch.stack([
+                        self.alpha @ torch.linalg.solve(reg_matrix, I - exp_Sx)
+                        for exp_Sx in exp_Sx_batch
+                    ])
                 except torch._C._LinAlgError:
-                    # If still singular, use pseudo-inverse as fallback
-                    E_i = self.alpha @ torch.linalg.pinv(
-                        reg_matrix) @ (I - exp_Sx)
+                    # Fallback to pseudo-inverse if needed
+                    reg_matrix_pinv = torch.linalg.pinv(reg_matrix)
+                    E_i_batch = torch.stack([
+                        self.alpha @ reg_matrix_pinv @ (I - exp_Sx)
+                        for exp_Sx in exp_Sx_batch
+                    ])
 
-                # E[number of jumps from i to j] for this observation
-                E_ij = torch.zeros((n, n), device=device)
-                for i in range(n):
-                    for j in range(n):
-                        if i != j and self.S[i, j] != 0:
-                            # For off-diagonal elements with non-zero transition rates
-                            # Create time points for numerical integration
-                            t_points = torch.linspace(
-                                0, x.item(), 100, device=device)
-                            # Calculate matrix exponential for each time point
-                            exp_values = torch.stack(
-                                [torch.matrix_exp(self.S * t)[i, j] for t in t_points])
-                            # Use trapz for numerical integration
-                            E_ij[i, j] = self.alpha[i] * self.S[i, j] * \
+                # Update sufficient statistics for the batch
+                for idx, (x, exp_Sx, density) in enumerate(zip(batch, exp_Sx_batch, densities)):
+                    E_i = E_i_batch[idx]
+
+                    # Compute E_ij more efficiently using vectorized operations where possible
+                    # For transitions with non-zero rates
+                    mask = (torch.eye(n, device=device) == 0) & (self.S != 0)
+                    if mask.any():
+                        # Use fewer time points for integration to improve efficiency
+                        t_points = torch.linspace(
+                            0, x.item(), 50, device=device)
+
+                        # Compute all matrix exponentials at once
+                        exp_St = torch.stack(
+                            [torch.matrix_exp(self.S * t) for t in t_points])
+
+                        # For each non-zero transition
+                        indices = mask.nonzero(as_tuple=True)
+                        for idx in range(len(indices[0])):
+                            i, j = indices[0][idx].item(
+                            ), indices[1][idx].item()
+                            exp_values = exp_St[:, i, j]
+                            B[i, j] += self.alpha[i] * self.S[i, j] * \
                                 torch.trapz(exp_values, t_points)
 
-                # Update sufficient statistics
-                B += E_ij
-                z += self.alpha * exp_Sx @ self.s / density
+                    # Update z
+                    z += self.alpha * exp_Sx @ self.s / density
 
             # Print log likelihood for debugging
             print(
@@ -614,23 +630,22 @@ class PriorWeightPhaseType(PriorWeightDistributionTemplate):
             self.alpha = z / len(data)
             self.alpha = self.alpha / self.alpha.sum()  # Normalize
 
-            # Update transition rate matrix
+            # Update transition rate matrix more efficiently
             for i in range(n):
-                total_time_i = torch.sum(E_i[i])
+                total_time_i = torch.sum(E_i_batch[:, i])
                 if total_time_i > 0:
-                    for j in range(n):
-                        if i != j:
-                            self.S[i, j] = B[i, j] / total_time_i
+                    # Update all transitions from state i at once
+                    mask = torch.arange(n, device=device) != i
+                    self.S[i, mask] = B[i, mask] / total_time_i
 
-            # Ensure diagonal elements make row sums zero
-            for i in range(n):
-                self.S[i, i] = -torch.sum(self.S[i, :i]) - \
-                    torch.sum(self.S[i, i+1:])
+            # Ensure diagonal elements make row sums zero (vectorized)
+            row_sums = torch.sum(self.S, dim=1)
+            self.S.diagonal().copy_(-row_sums + self.S.diagonal())
 
             # Ensure diagonal elements are negative
-            for i in range(n):
-                if self.S[i, i] >= 0:
-                    self.S[i, i] = -0.1  # Set to a small negative value
+            diag_mask = self.S.diagonal() >= 0
+            if diag_mask.any():
+                self.S.diagonal()[diag_mask] = -0.1
 
             # Recompute exit rates
             self.s = -self.S.sum(dim=1)
@@ -638,9 +653,9 @@ class PriorWeightPhaseType(PriorWeightDistributionTemplate):
         # Ensure numerical stability
         # Make sure S is lower triangular with negative diagonal
         self.S = torch.tril(self.S)
-        for i in range(n):
-            if self.S[i, i] >= 0:
-                self.S[i, i] = -0.1  # Ensure negative diagonal
+        diag_mask = self.S.diagonal() >= 0
+        if diag_mask.any():
+            self.S.diagonal()[diag_mask] = -0.1
 
         # Recompute exit rates
         self.s = -self.S.sum(dim=1)
