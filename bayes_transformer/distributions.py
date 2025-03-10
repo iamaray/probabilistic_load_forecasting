@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class TrainableRandomDistribution(nn.Module):
@@ -502,6 +503,8 @@ class PriorWeightPhaseType(PriorWeightDistributionTemplate):
         # Ensure data is on the same device as the distribution parameters
         if self.device is not None and data.device != self.device:
             data = data.to(self.device)
+
+        data = F.softplus(data)
 
         # Store original parameters for reporting
         orig_S = self.S.clone()
