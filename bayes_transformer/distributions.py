@@ -690,7 +690,7 @@ class PriorWeightCauchyMM(PriorWeightTMM):
     def __init__(self, proportions: torch.Tensor = None, mus: torch.Tensor = None, sigmas: torch.Tensor = None, device=None, n=None):
         super().__init__(
             proportions=proportions,
-            nus=torch.tensor([1.0], device=device),
+            nus=torch.ones(n, device=device),
             sigmas=sigmas,
             mus=mus,
             device=device,
