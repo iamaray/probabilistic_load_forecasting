@@ -4,3 +4,4 @@ data/
 *.sbatch
 *.pt
 *.npy
+results/
