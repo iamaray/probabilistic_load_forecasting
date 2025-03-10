@@ -15,8 +15,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 priors = {
     # 'gmm': PriorWeightGMM,
-    'tmm': PriorWeightTMM
+    # 'tmm': PriorWeightTMM
     # 'cauchy_mm': PriorWeightCauchyMM
+    'phase_type': PriorWeightPhaseType
 }
 
 
