@@ -201,3 +201,127 @@ class DeepAR(nn.Module):
 
     def init_cell(self, batch_size):
         return torch.zeros(self.num_layers, batch_size, self.hidden_size, device=self.embedding.weight.device)
+
+    def forecast(self, context_target, context_covariates, forecast_covariates, mask=None, idx=None, num_samples=100):
+        """
+        Generate probabilistic forecasts for future time steps.
+
+        Args:
+            context_target: Tensor of shape (batch, context_length) containing historical target values.
+            context_covariates: Tensor of shape (batch, context_length, covariate_size) containing historical covariates.
+            forecast_covariates: Tensor of shape (batch, forecast_length, covariate_size) containing future covariates.
+            mask: Optional boolean tensor of shape (batch, context_length) with True for observed data in context window.
+            idx: Optional tensor of shape (1, batch) containing time series ids.
+                 If not provided, defaults to a range [0, batch_size-1].
+            num_samples: Number of Monte Carlo samples to draw for each forecast.
+
+        Returns:
+            samples: Tensor of shape (num_samples, batch, forecast_length) containing sampled trajectories.
+            means: Tensor of shape (batch, forecast_length) containing the mean forecasts.
+            sigmas: Tensor of shape (batch, forecast_length) containing the standard deviations.
+        """
+        self.eval()  # Set model to evaluation mode
+
+        with torch.no_grad():
+            batch_size, context_length = context_target.size()
+            _, forecast_length, _ = forecast_covariates.size()
+            device = context_target.device
+
+            # If no mask is provided, assume all context points are observed
+            if mask is None:
+                mask = torch.ones_like(context_target, dtype=torch.bool)
+
+            # If no ids are provided, assign each sample an id equal to its index
+            if idx is None:
+                idx = torch.arange(batch_size, device=device).unsqueeze(
+                    0)  # shape: (1, batch)
+
+            # Initialize storage for samples and distribution parameters
+            samples = torch.zeros(num_samples, batch_size,
+                                  forecast_length, device=device)
+            means = torch.zeros(batch_size, forecast_length, device=device)
+            sigmas = torch.zeros(batch_size, forecast_length, device=device)
+
+            # For each Monte Carlo sample
+            for s in range(num_samples):
+                # Initialize LSTM hidden and cell states
+                h = torch.zeros(self.num_layers, batch_size,
+                                self.hidden_size, device=device)
+                c = torch.zeros(self.num_layers, batch_size,
+                                self.hidden_size, device=device)
+
+                # Initial autoregressive input: zeros
+                input_prev = torch.zeros(batch_size, 1, device=device)
+
+                # First, run through the context window to condition the model
+                for t in range(context_length):
+                    # Extract covariates at time t
+                    # shape: (batch, covariate_size)
+                    cov_t = context_covariates[:, t]
+
+                    # Get embeddings for each time series
+                    # shape: (1, batch, embedding_dim)
+                    emb = self.embedding(idx)
+
+                    # Concatenate previous target, current covariates, and embedding
+                    lstm_in = torch.cat(
+                        [input_prev, cov_t, emb.squeeze(0)], dim=1)
+                    # shape: (1, batch, input_size)
+                    lstm_in = lstm_in.unsqueeze(0)
+
+                    # Pass through the LSTM
+                    out, (h, c) = self.lstm(lstm_in, (h, c))
+                    out = out.squeeze(0)  # shape: (batch, hidden_size)
+
+                    # Predict distribution parameters
+                    params = self.fc(out)  # shape: (batch, 2)
+                    mean = params[:, 0]    # predicted mean
+                    # ensure positivity
+                    sigma = F.softplus(params[:, 1]) + 1e-6
+
+                    # For autoregressive prediction: use true value if observed, else sample
+                    z_t = context_target[:, t]
+                    observed = mask[:, t]
+                    sample = mean + sigma * torch.randn_like(mean)
+                    next_input = torch.where(observed, z_t, sample)
+                    input_prev = next_input.unsqueeze(1)  # shape: (batch, 1)
+
+                # Now generate forecasts for future time steps
+                for t in range(forecast_length):
+                    # Extract covariates at future time t
+                    # shape: (batch, covariate_size)
+                    cov_t = forecast_covariates[:, t]
+
+                    # Get embeddings for each time series
+                    # shape: (1, batch, embedding_dim)
+                    emb = self.embedding(idx)
+
+                    # Concatenate previous prediction, current covariates, and embedding
+                    lstm_in = torch.cat(
+                        [input_prev, cov_t, emb.squeeze(0)], dim=1)
+                    # shape: (1, batch, input_size)
+                    lstm_in = lstm_in.unsqueeze(0)
+
+                    # Pass through the LSTM
+                    out, (h, c) = self.lstm(lstm_in, (h, c))
+                    out = out.squeeze(0)  # shape: (batch, hidden_size)
+
+                    # Predict distribution parameters
+                    params = self.fc(out)  # shape: (batch, 2)
+                    mean = params[:, 0]    # predicted mean
+                    # ensure positivity
+                    sigma = F.softplus(params[:, 1]) + 1e-6
+
+                    # Store the distribution parameters (only for the first sample)
+                    if s == 0:
+                        means[:, t] = mean
+                        sigmas[:, t] = sigma
+
+                    # Sample from the predicted distribution
+                    sample = mean + sigma * torch.randn_like(mean)
+                    samples[s, :, t] = sample
+
+                    # Use the sample as the next input
+                    input_prev = sample.unsqueeze(1)  # shape: (batch, 1)
+
+        return samples, means, sigmas
