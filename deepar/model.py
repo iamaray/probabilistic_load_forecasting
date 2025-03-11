@@ -202,7 +202,7 @@ class DeepAR(nn.Module):
     def init_cell(self, batch_size):
         return torch.zeros(self.num_layers, batch_size, self.hidden_size, device=self.embedding.weight.device)
 
-    def forecast(self, test_loader, num_samples=100):
+    def forecast(self, test_loader, num_samples=100, data_norm=None):
         """
         Generate probabilistic forecasts for future time steps using a test data loader.
 
@@ -225,45 +225,34 @@ class DeepAR(nn.Module):
         with torch.no_grad():
             for batch in test_loader:
                 # Check if we're using AR model (3 elements in batch) or non-AR model (2 elements)
-                if len(batch) == 3:  # AR model: (target, covariates, mask)
-                    context_target, context_covariates, mask = batch
+                context_target, context_covariates, mask = batch
 
-                    # For AR models, we need to split the data into context and forecast parts
-                    # based on the mask (True for context, False for forecast)
-                    batch_size = context_target.size(0)
-                    device = context_target.device
+                if data_norm is not None:
+                    context_target = data_norm.transform(context_target)
+                    context_covariates = data_norm.transform(
+                        context_covariates)
 
-                    # Find where the forecast part begins (first False in mask)
-                    # Assuming all samples have same context length
-                    forecast_start = mask[0].sum().item()
-                    context_length = forecast_start
-                    forecast_length = context_target.size(1) - context_length
+                # For AR models, we need to split the data into context and forecast parts
+                # based on the mask (True for context, False for forecast)
+                batch_size = context_target.size(0)
+                device = context_target.device
 
-                    # Split the data
-                    forecast_target = context_target[:, context_length:]
-                    forecast_covariates = context_covariates[:,
-                                                             context_length:]
-                    context_target = context_target[:, :context_length]
-                    context_covariates = context_covariates[:, :context_length]
-                    mask = mask[:, :context_length]
+                # Find where the forecast part begins (first False in mask)
+                # Assuming all samples have same context length
+                forecast_start = mask[0].sum().item()
+                context_length = forecast_start
+                forecast_length = context_target.size(1) - context_length
 
-                    # No specific time series IDs provided
-                    idx = torch.arange(batch_size, device=device).unsqueeze(0)
+                # Split the data
+                forecast_target = context_target[:, context_length:]
+                forecast_covariates = context_covariates[:,
+                                                         context_length:]
+                context_target = context_target[:, :context_length]
+                context_covariates = context_covariates[:, :context_length]
+                mask = mask[:, :context_length]
 
-                else:  # non-AR model: (X, Y)
-                    X, Y = batch
-                    # Assuming first column is the target
-                    context_target = X[:, :, 0]
-                    context_covariates = X[:, :, 1:]  # Rest are covariates
-                    forecast_covariates = torch.zeros_like(
-                        context_covariates[:, :Y.size(1), :])  # Placeholder
-                    # Assume all observed
-                    mask = torch.ones_like(context_target, dtype=torch.bool)
-                    batch_size = context_target.size(0)
-                    context_length = context_target.size(1)
-                    forecast_length = Y.size(1)
-                    device = context_target.device
-                    idx = torch.arange(batch_size, device=device).unsqueeze(0)
+                # No specific time series IDs provided
+                idx = torch.arange(batch_size, device=device).unsqueeze(0)
 
                 # Initialize storage for samples and distribution parameters
                 samples = torch.zeros(num_samples, batch_size,
@@ -311,6 +300,7 @@ class DeepAR(nn.Module):
                         z_t = context_target[:, t]
                         observed = mask[:, t]
                         sample = mean + sigma * torch.randn_like(mean)
+                        # sample = data_norm.reverse(sample)
                         next_input = torch.where(observed, z_t, sample)
                         input_prev = next_input.unsqueeze(
                             1)  # shape: (batch, 1)
@@ -361,5 +351,14 @@ class DeepAR(nn.Module):
                 all_samples.append(samples)
                 all_means.append(means)
                 all_sigmas.append(sigmas)
+                # Optionally, combine results from all batches.
+        # shape: (num_sampling, total_samples, seq_len)
+        all_samples = torch.cat(all_samples, dim=1)
+        print(all_samples.shape)
+        all_samples = data_norm.reverse(all_samples.unsqueeze(-1)).squeeze(-1)
+        # shape: (total_samples, seq_len)
+        all_means = torch.cat(all_means, dim=0)
+        # shape: (total_samples, seq_len)
+        all_sigmas = torch.cat(all_sigmas, dim=0)
 
         return all_samples, all_means, all_sigmas

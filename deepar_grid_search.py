@@ -18,7 +18,6 @@ def main(spatial='spatial'):
 
     suffix = "spatial_AR" if spatial else "non_spatial_AR"
 
-
     transforms = torch.load(os.path.join(
         "data", suffix, f"transforms_{suffix}.pt"))
     print(type(transforms))
@@ -60,12 +59,12 @@ def main(spatial='spatial'):
         val_loader,
         device=device,
         data_norm=transforms,
-        num_epochs=5,
+        num_epochs=10,
         savename="best_deepar_model"
     )
 
     samples, means, sigmas = best_model.forecast(
-        test_loader=test_loader, num_samples=40)
+        test_loader=test_loader, num_samples=40, data_norm=transforms)
 
     first_batch = next(iter(test_loader))
 
@@ -74,9 +73,9 @@ def main(spatial='spatial'):
     forecast_start = mask[0].sum().item()
     true_values = context_target[0, forecast_start:].cpu().numpy()
 
-    forecast_samples = samples[0][:, 0, :].cpu().numpy()
-    forecast_mean = means[0][0, :].cpu().numpy()
-    forecast_sigma = sigmas[0][0, :].cpu().numpy()
+    forecast_samples = samples[:, 0, :].cpu().numpy()
+    forecast_mean = means[0, :].cpu().numpy()
+    forecast_sigma = sigmas[0, :].cpu().numpy()
 
     # Create the plot
     plt.figure(figsize=(12, 6))
@@ -85,7 +84,7 @@ def main(spatial='spatial'):
     plt.plot(true_values, 'k-', linewidth=2, label='True Values')
 
     # Plot a subset of samples for clarity (e.g., 10 samples)
-    num_samples_to_plot = min(10, forecast_samples.shape[0])
+    num_samples_to_plot = forecast_samples.shape[0]
     for i in range(num_samples_to_plot):
         plt.plot(forecast_samples[i], 'b-', alpha=0.3)
 

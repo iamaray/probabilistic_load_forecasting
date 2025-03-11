@@ -1,0 +1,7 @@
+{
+    "covariate_size": 5,
+    "hidden_size": 20,
+    "num_layers": 1,
+    "embedding_dim": 32,
+    "learning_rate": 0.001
+}
