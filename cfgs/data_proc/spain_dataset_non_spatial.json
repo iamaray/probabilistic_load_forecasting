@@ -1,0 +1,21 @@
+{
+  "csv_path": "data/cleaned_spain_data.csv",
+  "train_start_end": [],
+  "val_start_end": [],
+  "test_start_end": [],
+  "ar_model": false,
+  "x_start_hour": 1,
+  "x_y_gap": 1,
+  "x_window": 168,
+  "y_window": 24,
+  "step_size": 1,
+  "batch_size": 64,
+  "num_workers": 1,
+  "included_feats": [
+    "total load actual",
+    "total load forecast",
+    "HoD",
+    "DoW",
+    "MoY"
+  ]
+}

@@ -242,7 +242,7 @@ def benchmark_preprocess(
         x_y_gap: int = 15,
         x_window: int = 168,
         y_window: int = 24,
-        step_size: int = 1,
+        step_size: int = 24,
         batch_size: int = 64,
         num_workers: int = 1,
         train_transforms=[StandardScaleNorm(device='cpu')],
@@ -258,10 +258,7 @@ def benchmark_preprocess(
     Returns the list of fitted transform objects.
     """
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     if train_transforms is None:
-        # train_transforms = [StandardScaleNorm(
-        #     device=device), MinMaxNorm(device=device)]
         train_transforms = [StandardScaleNorm(device=device)]
 
     raw_df = pd.read_csv(csv_path)
@@ -269,9 +266,11 @@ def benchmark_preprocess(
     date_series = pd.to_datetime(raw_df["Unnamed: 0"])
     raw_df = raw_df.drop("Unnamed: 0", axis=1)
 
-    if not spatial:
-        raw_df = raw_df[["ACTUAL_NetLoad", "NetLoad_Error",
-                         "NetLoad", "HoD", "DoW", "MoY"]]
+    # if not spatial:
+    # raw_df = raw_df[["ACTUAL_NetLoad", "NetLoad_Error",
+    #                  "NetLoad", "HoD", "DoW", "MoY"]]
+    if included_feats is not None:
+        raw_df = raw_df[included_feats]
 
     train_mask = (date_series >= train_start_end[0]) & (
         date_series < train_start_end[1])
@@ -288,27 +287,24 @@ def benchmark_preprocess(
     val_tensor = torch.tensor(val_df.to_numpy(), device=device).float()
     test_tensor = torch.tensor(test_df.to_numpy(), device=device).float()
 
-    if spatial:
-        for t in train_transforms:
-            t.change_transform_cols(12)
-    else:
-        for t in train_transforms:
-            t.change_transform_cols(3)
+    # if spatial:
+    #     for t in train_transforms:
+    #         t.change_transform_cols(12)
+    # else:
+    #     for t in train_transforms:
+    #         t.change_transform_cols(3)
 
     for t in train_transforms:
+        t.change_transform_cols(num_transform_cols)
+
         t.fit(train_tensor.unsqueeze(0).to(device))
         train_tensor = t.transform(train_tensor)
 
     suffix = "spatial" if spatial else "non_spatial"
 
-    # Save train_tensor to its own file
-    output_dir = f"data/{suffix}"
-    os.makedirs(output_dir, exist_ok=True)
-    torch.save(train_tensor, os.path.join(
-        output_dir, f"train_tensor_{suffix}.pt"))
-
-    # Save train_tensor to its own file
-    output_dir = f"data/{suffix}"
+    if output_dir is None:
+        output_dir = f"data/{suffix}"
+    
     os.makedirs(output_dir, exist_ok=True)
     torch.save(train_tensor, os.path.join(
         output_dir, f"train_tensor_{suffix}.pt"))
