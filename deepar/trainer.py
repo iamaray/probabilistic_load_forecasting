@@ -335,7 +335,7 @@ def grid_search(hyperparameter_grid, train_loader, val_loader, device='cpu', dat
     best_trainer = DeepARTrainer(
         best_model, best_optimizer, train_loader, val_loader, device)
 
-    for epoch in range(num_epochs + 20):
+    for epoch in range(num_epochs + 10):
         train_loss = best_trainer.train_epoch()
         val_loss = best_trainer.validate_epoch(data_norm=data_norm)
         print(
@@ -345,7 +345,7 @@ def grid_search(hyperparameter_grid, train_loader, val_loader, device='cpu', dat
     os.makedirs('modelsave', exist_ok=True)
 
     # Save the model and hyperparameters
-    timestamp = utils.get_timestamp()
+    # timestamp = utils.get_timestamp()
     model_path = os.path.join('modelsave', f'{savename}.pt')
     config_path = os.path.join(
         'modelsave', f'{savename}_cfg.json')
@@ -357,4 +357,4 @@ def grid_search(hyperparameter_grid, train_loader, val_loader, device='cpu', dat
     print(f"\nBest model saved to: {model_path}")
     print(f"Hyperparameters saved to: {config_path}")
 
-    return best_config, best_loss, results
+    return best_model, best_config, best_loss, results
