@@ -145,8 +145,10 @@ class TransformSequence(DataTransform):
         return x
 
     def reverse(self, transformed: torch.Tensor, reverse_col=0):
+    def reverse(self, transformed: torch.Tensor, reverse_col=0):
         x = transformed.clone()
         for t in reversed(self.transforms):
+            x = t.reverse(x, reverse_col)
             x = t.reverse(x, reverse_col)
         return x
 
@@ -215,6 +217,8 @@ def formPairsAR(
         combined = torch.cat([x_obs, x_fore], dim=0)
         targets.append(combined[:, 0])
         covariates.append(combined[:, 1:])
+        targets.append(combined[:, 0])
+        covariates.append(combined[:, 1:])
         mask = torch.cat([torch.ones(x_window, dtype=torch.bool),
                           torch.zeros(y_window, dtype=torch.bool)], dim=0)
         masks.append(mask)
@@ -254,6 +258,7 @@ def benchmark_preprocess(
 
     Returns the list of fitted transform objects.
     """
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     if train_transforms is None:
         # train_transforms = [StandardScaleNorm(
@@ -296,6 +301,13 @@ def benchmark_preprocess(
         train_tensor = t.transform(train_tensor)
 
     suffix = "spatial" if spatial else "non_spatial"
+
+    # Save train_tensor to its own file
+    output_dir = f"data/{suffix}"
+    os.makedirs(output_dir, exist_ok=True)
+    torch.save(train_tensor, os.path.join(
+        output_dir, f"train_tensor_{suffix}.pt"))
+
 
     # Save train_tensor to its own file
     output_dir = f"data/{suffix}"

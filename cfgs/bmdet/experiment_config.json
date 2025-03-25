@@ -1,0 +1,17 @@
+{
+  "training": {
+    "train_epochs": 1,
+    "save_model": true
+  },
+  "inference": {
+    "num_samples": 40,
+    "test_start_date": "2024-09-01",
+    "test_end_date": "2025-01-06"
+  },
+  "paths": {
+    "model_save_dir": "modelsave/bmdet",
+    "results_dir": "results",
+    "data_dir": "data"
+  },
+  "device": "cpu"
+}

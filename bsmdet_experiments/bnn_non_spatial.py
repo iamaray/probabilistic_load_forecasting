@@ -1,4 +1,8 @@
-# from preprocessing import readtoFiltered, preprocess
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from preprocessing import readtoFiltered, preprocess
 from bayes_transformer.model import BSMDeTWrapper
 from bayes_transformer.trainer import BayesTrainer
 # from grid_search import grid_search_torch_model
