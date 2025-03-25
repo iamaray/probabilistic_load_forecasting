@@ -5,6 +5,7 @@ import pandas as pd
 from torch.utils.data import Dataset, TensorDataset, DataLoader
 from datetime import datetime
 import os
+import argparse
 
 """Data processing that runs on the cleaned dataset. Some elements are hard-coded."""
 
@@ -229,6 +230,7 @@ def formPairsAR(
 
 
 def benchmark_preprocess(
+        csv_path="data/ercot_data_cleaned.csv",
         train_start_end=(datetime(2023, 2, 10), datetime(2024, 7, 1)),
         val_start_end=(datetime(2024, 7, 1), datetime(2024, 9, 1)),
         test_start_end=(datetime(2024, 9, 1), datetime(2025, 1, 6)),
@@ -237,7 +239,7 @@ def benchmark_preprocess(
         x_y_gap: int = 15,
         x_window: int = 168,
         y_window: int = 24,
-        step_size: int = 24,
+        step_size: int = 1,
         batch_size: int = 64,
         num_workers: int = 1,
         train_transforms=[StandardScaleNorm(device='cpu')],
@@ -258,7 +260,6 @@ def benchmark_preprocess(
         #     device=device), MinMaxNorm(device=device)]
         train_transforms = [StandardScaleNorm(device=device)]
 
-    csv_path = "data/ercot_data_cleaned.csv"
     raw_df = pd.read_csv(csv_path)
 
     date_series = pd.to_datetime(raw_df["Unnamed: 0"])
@@ -365,14 +366,20 @@ def benchmark_preprocess(
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description='Data preprocessing for power consumption dataset')
+    parser.add_argument('--csv_path', type=str, default='data/ercot_data_cleaned.csv',
+                        help='Path to the CSV file containing power consumption data')
+    args = parser.parse_args()
+
     # For non-AR models
     spatial_transforms = benchmark_preprocess(
-        spatial=True, ar_model=False, train_transforms=None)
+        spatial=True, ar_model=False, train_transforms=None, csv_path=args.csv_path)
     non_spatial_transforms = benchmark_preprocess(
-        spatial=False, ar_model=False, train_transforms=None)
+        spatial=False, ar_model=False, train_transforms=None, csv_path=args.csv_path)
 
     # For AR models
     spatial_transforms = benchmark_preprocess(
-        spatial=True, ar_model=True)
+        spatial=True, ar_model=True, csv_path=args.csv_path)
     non_spatial_transforms = benchmark_preprocess(
-        spatial=False, ar_model=True)
+        spatial=False, ar_model=True, csv_path=args.csv_path)
