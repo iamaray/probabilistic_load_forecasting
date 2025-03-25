@@ -6,6 +6,8 @@ from torch.utils.data import Dataset, TensorDataset, DataLoader
 from datetime import datetime
 import os
 import argparse
+import json
+import pytz
 
 """Data processing that runs on the cleaned dataset. Some elements are hard-coded."""
 
@@ -216,8 +218,6 @@ def formPairsAR(
         combined = torch.cat([x_obs, x_fore], dim=0)
         targets.append(combined[:, 0])
         covariates.append(combined[:, 1:])
-        targets.append(combined[:, 0])
-        covariates.append(combined[:, 1:])
         mask = torch.cat([torch.ones(x_window, dtype=torch.bool),
                           torch.zeros(y_window, dtype=torch.bool)], dim=0)
         masks.append(mask)
@@ -245,8 +245,12 @@ def benchmark_preprocess(
         step_size: int = 24,
         batch_size: int = 64,
         num_workers: int = 1,
+        included_feats=None,
+        num_transform_cols=2,
         train_transforms=[StandardScaleNorm(device='cpu')],
-        ar_model: bool = False):
+        ar_model: bool = False,
+        output_dir=None,
+        date_column="Unnamed: 0"):
     """
     Loads the cleaned CSV data and performs time-series splitting, transformation,
     windowing (pair formation), and creation of DataLoaders. The datasets and loaders
@@ -263,21 +267,53 @@ def benchmark_preprocess(
 
     raw_df = pd.read_csv(csv_path)
 
-    date_series = pd.to_datetime(raw_df["Unnamed: 0"])
-    raw_df = raw_df.drop("Unnamed: 0", axis=1)
+    # Find date column (try common names if specified column doesn't exist)
+    if date_column in raw_df.columns:
+        date_series = pd.to_datetime(raw_df[date_column])
+        raw_df = raw_df.drop(date_column, axis=1)
+    elif "time" in raw_df.columns:
+        date_series = pd.to_datetime(raw_df["time"])
+        raw_df = raw_df.drop("time", axis=1)
+    elif "date" in raw_df.columns:
+        date_series = pd.to_datetime(raw_df["date"])
+        raw_df = raw_df.drop("date", axis=1)
+    elif "datetime" in raw_df.columns:
+        date_series = pd.to_datetime(raw_df["datetime"])
+        raw_df = raw_df.drop("datetime", axis=1)
+    else:
+        # Assume first column is the date column
+        date_series = pd.to_datetime(raw_df.iloc[:, 0])
+        raw_df = raw_df.iloc[:, 1:]
+        print(
+            f"Warning: No date column found with name '{date_column}'. Using first column as date.")
 
-    # if not spatial:
-    # raw_df = raw_df[["ACTUAL_NetLoad", "NetLoad_Error",
-    #                  "NetLoad", "HoD", "DoW", "MoY"]]
+    # Handle timezone differences
+    is_tz_aware = date_series.dt.tz is not None
+
+    # Convert dates for comparison based on timezone awareness
+    def convert_date_for_comparison(date_obj):
+        if is_tz_aware and date_obj.tzinfo is None:
+            # If data has timezone but comparison date doesn't, add UTC timezone
+            return pytz.UTC.localize(date_obj)
+        elif not is_tz_aware and date_obj.tzinfo is not None:
+            # If data has no timezone but comparison date does, remove timezone
+            return date_obj.replace(tzinfo=None)
+        return date_obj
+
+    train_start = convert_date_for_comparison(train_start_end[0])
+    train_end = convert_date_for_comparison(train_start_end[1])
+    val_start = convert_date_for_comparison(val_start_end[0])
+    val_end = convert_date_for_comparison(val_start_end[1])
+    test_start = convert_date_for_comparison(test_start_end[0])
+    test_end = convert_date_for_comparison(test_start_end[1])
+
+    # Filter features if specified
     if included_feats is not None:
         raw_df = raw_df[included_feats]
 
-    train_mask = (date_series >= train_start_end[0]) & (
-        date_series < train_start_end[1])
-    val_mask = (date_series >= val_start_end[0]) & (
-        date_series < val_start_end[1])
-    test_mask = (date_series >= test_start_end[0]) & (
-        date_series < test_start_end[1])
+    train_mask = (date_series >= train_start) & (date_series < train_end)
+    val_mask = (date_series >= val_start) & (date_series < val_end)
+    test_mask = (date_series >= test_start) & (date_series < test_end)
 
     train_df = raw_df[train_mask]
     val_df = raw_df[val_mask]
@@ -304,10 +340,13 @@ def benchmark_preprocess(
 
     if output_dir is None:
         output_dir = f"data/{suffix}"
-    
+
+    print(f"Saving data to directory: {output_dir}")
     os.makedirs(output_dir, exist_ok=True)
-    torch.save(train_tensor, os.path.join(
-        output_dir, f"train_tensor_{suffix}.pt"))
+
+    train_tensor_path = os.path.join(output_dir, f"train_tensor_{suffix}.pt")
+    print(f"Saving train tensor to: {train_tensor_path}")
+    torch.save(train_tensor, train_tensor_path)
 
     if ar_model:
         suffix = f"{suffix}_AR"
@@ -346,46 +385,108 @@ def benchmark_preprocess(
     print(f"{suffix} Val loader shape: {next(iter(val_loader))[0].shape}")
     print(f"{suffix} Test loader shape: {next(iter(test_loader))[0].shape}")
 
-    output_dir = f"data/{suffix}"
-    os.makedirs(output_dir, exist_ok=True)
+    train_dataset_path = os.path.join(output_dir, f"train_dataset_{suffix}.pt")
+    print(f"Saving train dataset to: {train_dataset_path}")
+    torch.save(train_dataset, train_dataset_path)
 
-    torch.save(train_dataset, os.path.join(
-        output_dir, f"train_dataset_{suffix}.pt"))
-    torch.save(val_dataset, os.path.join(
-        output_dir, f"val_dataset_{suffix}.pt"))
-    torch.save(test_dataset, os.path.join(
-        output_dir, f"test_dataset_{suffix}.pt"))
-    torch.save(train_loader, os.path.join(
-        output_dir, f"train_loader_{suffix}.pt"))
-    torch.save(val_loader, os.path.join(output_dir, f"val_loader_{suffix}.pt"))
-    torch.save(test_loader, os.path.join(
-        output_dir, f"test_loader_{suffix}.pt"))
+    val_dataset_path = os.path.join(output_dir, f"val_dataset_{suffix}.pt")
+    print(f"Saving validation dataset to: {val_dataset_path}")
+    torch.save(val_dataset, val_dataset_path)
+
+    test_dataset_path = os.path.join(output_dir, f"test_dataset_{suffix}.pt")
+    print(f"Saving test dataset to: {test_dataset_path}")
+    torch.save(test_dataset, test_dataset_path)
+
+    train_loader_path = os.path.join(output_dir, f"train_loader_{suffix}.pt")
+    print(f"Saving train loader to: {train_loader_path}")
+    torch.save(train_loader, train_loader_path)
+
+    val_loader_path = os.path.join(output_dir, f"val_loader_{suffix}.pt")
+    print(f"Saving validation loader to: {val_loader_path}")
+    torch.save(val_loader, val_loader_path)
+
+    test_loader_path = os.path.join(output_dir, f"test_loader_{suffix}.pt")
+    print(f"Saving test loader to: {test_loader_path}")
+    torch.save(test_loader, test_loader_path)
 
     if len(train_transforms) > 1:
         train_transforms = TransformSequence(train_transforms, device)
-        torch.save(train_transforms, os.path.join(
-            output_dir, f"transforms_{suffix}.pt"))
+        transforms_path = os.path.join(output_dir, f"transforms_{suffix}.pt")
+        print(f"Saving transforms to: {transforms_path}")
+        torch.save(train_transforms, transforms_path)
     else:
-        torch.save(train_transforms[0], os.path.join(
-            output_dir, f"transforms_{suffix}.pt"))
+        transforms_path = os.path.join(output_dir, f"transforms_{suffix}.pt")
+        print(f"Saving transforms to: {transforms_path}")
+        torch.save(train_transforms[0], transforms_path)
     return train_transforms
 
 
 if __name__ == "__main__":
+    # parser = argparse.ArgumentParser(
+    #     description='Data preprocessing for power consumption dataset')
+    # parser.add_argument('--csv_path', type=str, default='data/ercot_data_cleaned.csv',
+    #                     help='Path to the CSV file containing power consumption data')
+    # args = parser.parse_args()
+
+    # # For non-AR models
+    # spatial_transforms = benchmark_preprocess(
+    #     spatial=True, ar_model=False, train_transforms=None, csv_path=args.csv_path)
+    # non_spatial_transforms = benchmark_preprocess(
+    #     spatial=False, ar_model=False, train_transforms=None, csv_path=args.csv_path)
+
+    # # For AR models
+    # spatial_transforms = benchmark_preprocess(
+    #     spatial=True, ar_model=True, csv_path=args.csv_path)
+    # non_spatial_transforms = benchmark_preprocess(
+    #     spatial=False, ar_model=True, csv_path=args.csv_path)
     parser = argparse.ArgumentParser(
         description='Data preprocessing for power consumption dataset')
-    parser.add_argument('--csv_path', type=str, default='data/ercot_data_cleaned.csv',
-                        help='Path to the CSV file containing power consumption data')
+    parser.add_argument('--config_path', type=str, default='cfgs/data_proc/spain_dataset_non_spatial.json',
+                        help='Path to the config file containing preprocessing parameters')
     args = parser.parse_args()
 
-    # For non-AR models
-    spatial_transforms = benchmark_preprocess(
-        spatial=True, ar_model=False, train_transforms=None, csv_path=args.csv_path)
-    non_spatial_transforms = benchmark_preprocess(
-        spatial=False, ar_model=False, train_transforms=None, csv_path=args.csv_path)
+    with open(args.config_path, 'r') as f:
+        config = json.load(f)
 
-    # For AR models
-    spatial_transforms = benchmark_preprocess(
-        spatial=True, ar_model=True, csv_path=args.csv_path)
-    non_spatial_transforms = benchmark_preprocess(
-        spatial=False, ar_model=True, csv_path=args.csv_path)
+    # Convert date strings to datetime objects if provided
+    def parse_date(date_value, default_date):
+        if not date_value:
+            return default_date
+        if isinstance(date_value, str):
+            return datetime.strptime(date_value, "%Y-%m-%d")
+        return default_date
+
+    train_start = parse_date(config.get("train_start"), datetime(2023, 2, 10))
+    train_end = parse_date(config.get("train_end"), datetime(2024, 7, 1))
+    val_start = parse_date(config.get("val_start"), datetime(2024, 7, 1))
+    val_end = parse_date(config.get("val_end"), datetime(2024, 9, 1))
+    test_start = parse_date(config.get("test_start"), datetime(2024, 9, 1))
+    test_end = parse_date(config.get("test_end"), datetime(2025, 1, 6))
+
+    # Setup transform based on device
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    train_transforms = [StandardScaleNorm(device=device)]
+
+    # Call benchmark_preprocess with parameters from config
+    transforms = benchmark_preprocess(
+        csv_path=config.get("csv_path", "data/ercot_data_cleaned.csv"),
+        train_start_end=(train_start, train_end),
+        val_start_end=(val_start, val_end),
+        test_start_end=(test_start, test_end),
+        spatial=config.get("spatial", False),
+        x_start_hour=config.get("x_start_hour", 9),
+        x_y_gap=config.get("x_y_gap", 15),
+        x_window=config.get("x_window", 168),
+        y_window=config.get("y_window", 24),
+        step_size=config.get("step_size", 24),
+        batch_size=config.get("batch_size", 64),
+        num_workers=config.get("num_workers", 1),
+        included_feats=config.get("included_feats", None),
+        num_transform_cols=config.get("num_transform_cols", 2),
+        train_transforms=train_transforms,
+        ar_model=config.get("ar_model", False),
+        output_dir=config.get("output_dir", None),
+        date_column=config.get("date_column", "Unnamed: 0")
+    )
+
+    print(f"Data preprocessing completed successfully. Transforms saved.")
