@@ -145,7 +145,6 @@ class TransformSequence(DataTransform):
         return x
 
     def reverse(self, transformed: torch.Tensor, reverse_col=0):
-    def reverse(self, transformed: torch.Tensor, reverse_col=0):
         x = transformed.clone()
         for t in reversed(self.transforms):
             x = t.reverse(x, reverse_col)
@@ -307,7 +306,6 @@ def benchmark_preprocess(
     os.makedirs(output_dir, exist_ok=True)
     torch.save(train_tensor, os.path.join(
         output_dir, f"train_tensor_{suffix}.pt"))
-
 
     # Save train_tensor to its own file
     output_dir = f"data/{suffix}"
