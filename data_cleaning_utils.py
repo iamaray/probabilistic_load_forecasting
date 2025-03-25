@@ -40,7 +40,7 @@ def strategic_fill(df):
 ############################
 # 1) Read CSV and convert to DataFrame
 ############################
-def load_data(csv_path, date_col='marketday', hour_col='hourending'):
+def load_data(csv_path, date_col='marketday', hour_col='hourending', is_engie_data=True):
     """
     Reads the CSV file, combines date_col + hour_col into a single datetime,
     and sets it as the index. Returns the DataFrame.

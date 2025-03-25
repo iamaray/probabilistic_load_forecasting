@@ -1,0 +1,31 @@
+{
+  "csv_path": "data/cleaned_spain_data.csv",
+  "train_start": "2015-01-02",
+  "train_end": "2018-01-01",
+  "val_start": "2018-01-01",
+  "val_end": "2018-07-01",
+  "test_start": "2018-07-01",
+  "test_end": "2018-12-31",
+  "ar_model": false,
+  "x_start_hour": 1,
+  "x_y_gap": 1,
+  "x_window": 168,
+  "y_window": 24,
+  "step_size": 1,
+  "batch_size": 64,
+  "num_workers": 1,
+  "included_feats": [
+    "total load actual",
+    "total load forecast",
+    "generation wind onshore",
+    "generation solar",
+    "generation hydro run-of-river and poundage",
+    "HoD",
+    "DoW",
+    "MoY"
+  ],
+  "num_transform_cols": 5,
+  "spatial": true,
+  "output_dir": "data/spain_data_spatial",
+  "date_column": "time"
+}
