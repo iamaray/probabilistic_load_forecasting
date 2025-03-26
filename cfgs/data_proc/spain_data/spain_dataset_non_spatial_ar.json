@@ -9,9 +9,9 @@
   "ar_model": true,
   "x_start_hour": 1,
   "x_y_gap": 1,
-  "x_window": 168,
+  "x_window": 336,
   "y_window": 24,
-  "step_size": 24,
+  "step_size": 1,
   "batch_size": 64,
   "num_workers": 1,
   "included_feats": [
