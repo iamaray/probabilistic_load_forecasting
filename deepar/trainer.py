@@ -13,7 +13,7 @@ from torch.utils.data.sampler import RandomSampler
 from tqdm import tqdm
 import itertools
 import utils
-from .model import DeepAR
+from .model import DeepAR, neg_gaussian_log_likelihood
 
 from metrics import compute_metrics
 # from evaluate import evaluate
@@ -196,73 +196,201 @@ from itertools import product
 
 
 class DeepARTrainer:
-    def __init__(self, model, optimizer, train_loader, val_loader=None, device='cpu'):
+    def __init__(self, model, optimizer, train_loader, val_loader=None, device='cpu', train_norm=None):
         """
+        Trainer for the DeepAR model.
+
         Args:
           model: An instance of the DeepAR model.
           optimizer: A PyTorch optimizer (e.g., Adam) for updating model parameters.
-          train_loader: DataLoader for training data. Each batch is expected to be a dict with keys:
-                        'target' (shape: [batch_size, seq_len]),
-                        'covariates' (shape: [batch_size, seq_len, covariate_size]),
-                        'mask' (shape: [batch_size, seq_len]) where True indicates observed data.
-          val_loader: (Optional) DataLoader for validation data (same expected format as train_loader).
+          train_loader: DataLoader for training data. Each batch contains target, covariates, mask.
+          val_loader: (Optional) DataLoader for validation data.
           device: Device to run the model on ('cpu' or 'cuda').
+          train_norm: Data transformation for normalization.
         """
         self.model = model.to(device)
         self.optimizer = optimizer
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.device = device
+        self.train_norm = train_norm
 
     def train_epoch(self):
         """Run one epoch of training."""
+        self.optimizer.zero_grad()
+
         self.model.train()
         total_loss = 0.0
-        for batch in self.train_loader:
+        num_batches = 0
 
-            # Shape: (batch_size, seq_len)
-            targets = batch[0].to(self.device)
-            # Shape: (batch_size, seq_len, covariate_size)
+        for batch in self.train_loader:
+            # From DataLoader we get:
+            # batch[0]: target sequence - Shape: (batch_size, seq_len)
+            # batch[1]: covariates - Shape: (batch_size, seq_len, covariate_size)
+            # batch[2]: mask - Shape: (batch_size, seq_len) - boolean mask
+
+            # Get batch components and move to device
+            target = batch[0].to(self.device)
             covariates = batch[1].to(self.device)
-            # Shape: (batch_size, seq_len)
+            # This indicates which parts of the sequence are observed
             mask = batch[2].to(self.device)
 
-            self.optimizer.zero_grad()
-            loss, _ = self.model(targets, covariates, mask)
+            batch_size = target.shape[0]
+            seq_len = target.shape[1]
+
+            # Create default time series index (zeros) if your model needs it
+            idx = torch.zeros(batch_size, dtype=torch.long, device=self.device)
+
+            # Initialize hidden and cell states
+            h = self.model.init_hidden(batch_size)
+            c = self.model.init_cell(batch_size)
+
+            # Full sequence loss
+            loss = torch.zeros(1, device=self.device)
+
+            # Process the sequence step by step as required by the model
+            # This follows the model's expected interface
+            for t in range(seq_len):
+                # Skip the loss calculation at the prediction window
+                if not mask[:, t].any():
+                    continue
+
+                # Handle missing values by replacing them with previous predictions
+                zero_index = (target[:, t] == 0)
+                if t > 0 and torch.sum(zero_index) > 0:
+                    target[:, t][zero_index] = mu[zero_index]
+
+                # Process one step through the model
+                # Note: need to adjust dimensions to match model expectations
+                # Model expects target (1, batch) and covariates (1, batch, cov_size)
+                current_target = target[:, t].unsqueeze(0)
+                current_covariates = covariates[:, t, :].unsqueeze(0)
+
+                # Forward pass through the model
+                mu, sigma, h, c = self.model(
+                    target=current_target,
+                    covariates=current_covariates,
+                    idx=idx.unsqueeze(0),
+                    h=h,
+                    c=c
+                )
+
+                # Calculate loss only for observed time steps (where mask is True)
+                step_mask = mask[:, t]
+                if step_mask.any():
+                    # Use negative log likelihood for Gaussian distribution
+                    step_loss = neg_gaussian_log_likelihood(
+                        mu, sigma, target[:, t])
+                    loss += step_loss.sum()
+
             loss.backward()
             self.optimizer.step()
 
-            total_loss += loss.item()
-        return total_loss / len(self.train_loader)
+            # Normalize the loss by the number of observed time steps
+            observed_points = mask.sum()
+            if observed_points > 0:
+                loss = loss / observed_points
 
-    def validate_epoch(self, data_norm):
+            total_loss += loss.item()
+            num_batches += 1
+
+        return total_loss / num_batches if num_batches > 0 else 0.0
+
+    def validate_epoch(self):
         """Run one epoch of validation."""
         self.model.eval()
         total_loss = 0.0
-        data_norm.set_device(device=self.device)
+        num_batches = 0
+
         with torch.no_grad():
             for batch in self.val_loader:
-                targets = data_norm.transform(
-                    transform_col=0, x=batch[0].unsqueeze(-1).to(self.device)).squeeze()
-                print('here', targets.shape)
-                covariates = data_norm.transform(batch[1].to(self.device))
+                # Similar process as training but without backpropagation
+                target = batch[0].to(self.device)
+                covariates = batch[1].to(self.device)
                 mask = batch[2].to(self.device)
 
-                loss, _ = self.model(targets, covariates, mask)
+                # print(target.shape, covariates.shape)
+
+                transformed = torch.cat(
+                    [target.unsqueeze(-1), covariates], dim=-1)
+                transformed = self.train_norm.transform(
+                    transformed)
+
+                target = transformed[:, :, 0]
+                covariates = transformed[:, :, 1:]
+
+                # print(target.shape, covariates.shape)
+
+                batch_size = target.shape[0]
+                seq_len = target.shape[1]
+
+                idx = torch.zeros(
+                    batch_size, dtype=torch.long, device=self.device)
+                h = self.model.init_hidden(batch_size)
+                c = self.model.init_cell(batch_size)
+
+                loss = torch.zeros(1, device=self.device)
+
+                for t in range(seq_len):
+                    if not mask[:, t].any():
+                        continue
+
+                    zero_index = (target[:, t] == 0)
+                    if t > 0 and torch.sum(zero_index) > 0:
+                        target[:, t][zero_index] = mu[zero_index]
+
+                    current_target = target[:, t].unsqueeze(0)
+                    current_covariates = covariates[:, t, :].unsqueeze(0)
+
+                    mu, sigma, h, c = self.model(
+                        target=current_target,
+                        covariates=current_covariates,
+                        idx=idx.unsqueeze(0),
+                        h=h,
+                        c=c
+                    )
+
+                    step_mask = mask[:, t]
+                    if step_mask.any():
+                        step_loss = neg_gaussian_log_likelihood(
+                            mu, sigma, target[:, t])
+                        loss += step_loss.sum()
+
+                observed_points = mask.sum()
+                if observed_points > 0:
+                    loss = loss / observed_points
+
                 total_loss += loss.item()
-        return total_loss / len(self.val_loader)
+                num_batches += 1
+
+        return total_loss / num_batches if num_batches > 0 else 0.0
 
     def train(self, num_epochs):
         """Run the training loop for a given number of epochs."""
+        train_losses = []
+        val_losses = []
+
         for epoch in range(num_epochs):
             train_loss = self.train_epoch()
+            train_losses.append(train_loss)
+
             if self.val_loader is not None:
                 val_loss = self.validate_epoch()
+                val_losses.append(val_loss)
                 print(
                     f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
             else:
                 print(
                     f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}")
+
+        return train_losses, val_losses
+
+    def save_model(self, savepath='modelsave', savename='deepar_model.pt'):
+        """Save the model to disk."""
+        os.makedirs(savepath, exist_ok=True)
+        model_path = os.path.join(savepath, savename)
+        torch.save(self.model.state_dict(), model_path)
+        print(f"Model saved to {model_path}")
 
 
 def grid_search(hyperparameter_grid, train_loader, val_loader, device='cpu', data_norm=None, num_epochs=10, savename='deepar_best_model_spatial'):
@@ -271,20 +399,16 @@ def grid_search(hyperparameter_grid, train_loader, val_loader, device='cpu', dat
 
     Args:
         hyperparameter_grid (dict): A dictionary where each key is a hyperparameter name and each value 
-                                    is a list of possible values. Expected keys include:
-                                    - "covariate_size": int, dimensionality of covariates.
-                                    - "hidden_size": int, number of LSTM hidden units.
-                                    - "num_layers": int, number of LSTM layers.
-                                    - "learning_rate": float, learning rate for the optimizer.
+                                    is a list of possible values.
         train_loader: PyTorch DataLoader for training data.
         val_loader: PyTorch DataLoader for validation data.
         device (str): 'cpu' or 'cuda'.
+        data_norm: Data normalization transforms.
         num_epochs (int): Number of epochs to train each model.
+        savename (str): Base name to save the best model.
 
     Returns:
-        best_config (dict): The configuration with the lowest validation loss.
-        best_loss (float): The lowest achieved validation loss.
-        results (list): A list of tuples (config, validation_loss) for each grid combination.
+        best_model, best_config, best_loss, results
     """
     best_config = None
     best_loss = float('inf')
@@ -293,25 +417,48 @@ def grid_search(hyperparameter_grid, train_loader, val_loader, device='cpu', dat
     keys = list(hyperparameter_grid.keys())
     values = [hyperparameter_grid[key] for key in keys]
 
+    # Check shape of the data
+    sample_batch = next(iter(train_loader))
+    target_shape = sample_batch[0].shape
+    covariate_shape = sample_batch[1].shape
+
+    print(f"Sample target shape: {target_shape}")
+    print(f"Sample covariates shape: {covariate_shape}")
+
     for combination in itertools.product(*values):
         config = dict(zip(keys, combination))
         print(f"Testing configuration: {config}")
 
-        model = DeepAR(covariate_size=config["covariate_size"],
-                       hidden_size=config["hidden_size"],
-                       num_layers=config["num_layers"])
-        model = model.to(device)
+        # Create model with current config
+        model = DeepAR(
+            num_class=config.get("num_class", 1),
+            embedding_dim=config.get("embedding_dim", 32),
+            covariate_size=config["covariate_size"],
+            hidden_size=config["hidden_size"],
+            num_layers=config["num_layers"],
+            predict_steps=config.get("predict_steps", 24),
+            predict_start=config.get("predict_start", 168)
+        ).to(device)
 
         optimizer = optim.Adam(model.parameters(), lr=config["learning_rate"])
 
         trainer = DeepARTrainer(
-            model, optimizer, train_loader, val_loader, device)
+            model=model,
+            optimizer=optimizer,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            device=device,
+            train_norm=data_norm
+        )
 
+        # Train for specified number of epochs
         for epoch in range(num_epochs):
-            l = trainer.train_epoch()
-            print(f"Epoch {epoch+1}/{num_epochs}: {l}")
+            train_loss = trainer.train_epoch()
+            print(
+                f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}")
 
-        val_loss = trainer.validate_epoch(data_norm=data_norm)
+        # Evaluate on validation set
+        val_loss = trainer.validate_epoch()
         print(f"Config {config} achieved validation loss: {val_loss:.4f}")
 
         results.append((config, val_loss))
@@ -323,32 +470,44 @@ def grid_search(hyperparameter_grid, train_loader, val_loader, device='cpu', dat
     print(
         f"\nBest configuration: {best_config} with validation loss: {best_loss:.4f}")
 
-    # Train best model for additional 20 epochs
-    print("\nTraining best model for 20 additional epochs...")
-    best_model = DeepAR(covariate_size=best_config["covariate_size"],
-                        hidden_size=best_config["hidden_size"],
-                        num_layers=best_config["num_layers"],
-                        embedding_dim=best_config['embedding_dim'])
-    best_model = best_model.to(device)
+    # Train best model for additional epochs
+    extra_epochs = 50
+    print(f"\nTraining best model for {extra_epochs} additional epochs...")
+
+    best_model = DeepAR(
+        num_class=best_config.get("num_class", 1),
+        embedding_dim=best_config.get("embedding_dim", 32),
+        covariate_size=best_config["covariate_size"],
+        hidden_size=best_config["hidden_size"],
+        num_layers=best_config["num_layers"],
+        predict_steps=best_config.get("predict_steps", 24),
+        predict_start=best_config.get("predict_start", 168)
+    ).to(device)
+
     best_optimizer = optim.Adam(
         best_model.parameters(), lr=best_config["learning_rate"])
-    best_trainer = DeepARTrainer(
-        best_model, best_optimizer, train_loader, val_loader, device)
 
-    for epoch in range(num_epochs + 10):
+    best_trainer = DeepARTrainer(
+        model=best_model,
+        optimizer=best_optimizer,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        device=device,
+        train_norm=data_norm
+    )
+
+    for epoch in range(num_epochs + extra_epochs):
         train_loss = best_trainer.train_epoch()
-        val_loss = best_trainer.validate_epoch(data_norm=data_norm)
+        val_loss = best_trainer.validate_epoch()
         print(
-            f"Training best model -- Epoch {epoch+1}/{num_epochs + 20}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+            f"Training best model -- Epoch {epoch+1}/{num_epochs + extra_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
 
     # Create modelsave directory if it doesn't exist
     os.makedirs('modelsave', exist_ok=True)
 
     # Save the model and hyperparameters
-    # timestamp = utils.get_timestamp()
     model_path = os.path.join('modelsave', f'{savename}.pt')
-    config_path = os.path.join(
-        'modelsave', f'{savename}_cfg.json')
+    config_path = os.path.join('modelsave', f'{savename}_cfg.json')
 
     torch.save(best_model.state_dict(), model_path)
     with open(config_path, 'w') as f:

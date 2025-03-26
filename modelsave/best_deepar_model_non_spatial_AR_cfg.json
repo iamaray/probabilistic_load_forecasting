@@ -1,0 +1,10 @@
+{
+    "num_class": 100,
+    "covariate_size": 4,
+    "hidden_size": 40,
+    "num_layers": 3,
+    "embedding_dim": 32,
+    "learning_rate": 0.001,
+    "predict_steps": 24,
+    "predict_start": 168
+}

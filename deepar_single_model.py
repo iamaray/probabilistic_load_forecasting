@@ -5,9 +5,9 @@ import argparse
 
 from deepar.model import DeepAR
 from deepar.trainer import DeepARTrainer, grid_search
+from data_proc import StandardScaleNorm
 
-
-def main(spatial='spatial'):
+def main(spatial='spatial', dataset="ercot_data"):
     spatial = True if spatial == 'spatial' else False
     # Set device.
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -22,13 +22,13 @@ def main(spatial='spatial'):
     # First, call benchmark_preprocess() to process and save the data.
     # (Note: benchmark_preprocess() returns the fitted transforms; the loaders are saved on disk.)
     transforms = torch.load(os.path.join(
-        "data", suffix, f"trainsforms_{suffix}"))
+        f"data/{dataset}_{suffix}", f"transforms_{suffix}.pt"))
 
     # Load the saved data loaders.
     train_loader = torch.load(os.path.join(
-        "data", suffix, f"train_loader_{suffix}.pt"))
+        f"data/{dataset}_{suffix}", f"train_loader_{suffix}.pt"))
     val_loader = torch.load(os.path.join(
-        "data", suffix, f"val_loader_{suffix}.pt"))
+        f"data/{dataset}_{suffix}", f"val_loader_{suffix}.pt"))
 
     for i, (x, y, z) in enumerate(train_loader):
         print(x.shape, y.shape, z.shape)
