@@ -14,7 +14,7 @@ def main(spatial='spatial', dataset="spain_data"):
     spatial = True if spatial == 'spatial' else False
     # Set device.
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    device = torch.device(device)
+    print(f"Using device: {device}")
 
     suffix = "spatial_AR" if spatial else "non_spatial_AR"
 
@@ -22,6 +22,10 @@ def main(spatial='spatial', dataset="spain_data"):
     transforms = torch.load(os.path.join(
         f"data/{dataset}_{suffix}", f"transforms_{suffix}.pt"))
     print(f"Loaded data transforms: {type(transforms)}")
+
+    # Explicitly set the device for transforms
+    transforms.set_device(device)
+    print(f"Set transforms to device: {device}")
 
     # Load the saved data loaders.
     train_loader = torch.load(os.path.join(
@@ -40,18 +44,7 @@ def main(spatial='spatial', dataset="spain_data"):
     covariate_dim = sample_batch[1].shape[-1]
     print(f"Covariate dimension: {covariate_dim}")
 
-    # # Setup grid search parameters
-    # hyperparameter_grid = {
-    #     "num_class": [100],  # Number of distinct time series identifiers
-    #     "covariate_size": [covariate_dim],
-    #     "hidden_size": [40, 60],
-    #     "num_layers": [3],
-    #     "embedding_dim": [32, 64],
-    #     "learning_rate": [1e-3],
-    #     "predict_steps": [24],  # Number of steps to forecast
-    #     "predict_start": [168]  # Index where forecasting starts
-    # }
-
+    # Setup grid search parameters - using simplified version for debugging
     hyperparameter_grid = {
         "num_class": [100],  # Number of distinct time series identifiers
         "covariate_size": [covariate_dim],
@@ -70,7 +63,7 @@ def main(spatial='spatial', dataset="spain_data"):
         hyperparameter_grid,
         train_loader,
         val_loader,
-        device=device,
+        device=device,  # Pass device explicitly
         data_norm=transforms,
         num_epochs=1,
         savename=f"best_deepar_model_{suffix}"

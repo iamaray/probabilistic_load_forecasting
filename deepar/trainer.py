@@ -208,12 +208,16 @@ class DeepARTrainer:
           device: Device to run the model on ('cpu' or 'cuda').
           train_norm: Data transformation for normalization.
         """
-        self.model = model.to(device)
+        self.model = model
         self.optimizer = optimizer
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.device = device
         self.train_norm = train_norm
+
+        # Ensure model and data_norm are on the correct device
+        if self.train_norm is not None:
+            self.train_norm.set_device(self.device)
 
     def train_epoch(self):
         """Run one epoch of training."""
@@ -302,6 +306,10 @@ class DeepARTrainer:
         total_loss = 0.0
         num_batches = 0
 
+        # Make sure transforms are on the same device
+        if self.train_norm is not None:
+            self.train_norm.set_device(self.device)
+
         with torch.no_grad():
             for batch in self.val_loader:
                 # Similar process as training but without backpropagation
@@ -309,17 +317,15 @@ class DeepARTrainer:
                 covariates = batch[1].to(self.device)
                 mask = batch[2].to(self.device)
 
-                # print(target.shape, covariates.shape)
+                # Apply normalization if provided
+                if self.train_norm is not None:
+                    transformed = torch.cat(
+                        [target.unsqueeze(-1), covariates], dim=-1)
+                    transformed = self.train_norm.transform(
+                        transformed)
 
-                transformed = torch.cat(
-                    [target.unsqueeze(-1), covariates], dim=-1)
-                transformed = self.train_norm.transform(
-                    transformed)
-
-                target = transformed[:, :, 0]
-                covariates = transformed[:, :, 1:]
-
-                # print(target.shape, covariates.shape)
+                    target = transformed[:, :, 0]
+                    covariates = transformed[:, :, 1:]
 
                 batch_size = target.shape[0]
                 seq_len = target.shape[1]
@@ -393,7 +399,7 @@ class DeepARTrainer:
         print(f"Model saved to {model_path}")
 
 
-def grid_search(hyperparameter_grid, train_loader, val_loader, device='cpu', data_norm=None, num_epochs=10, savename='deepar_best_model_spatial'):
+def grid_search(hyperparameter_grid, train_loader, val_loader, device='cuda', data_norm=None, num_epochs=10, savename='deepar_best_model_spatial'):
     """
     Performs a grid search over the hyperparameter grid for the DeepAR model.
 
@@ -413,6 +419,11 @@ def grid_search(hyperparameter_grid, train_loader, val_loader, device='cpu', dat
     best_config = None
     best_loss = float('inf')
     results = []
+
+    # Ensure data_norm is on the correct device
+    if data_norm is not None:
+        data_norm.set_device(device)
+        print(f"Set data_norm to device: {device}")
 
     keys = list(hyperparameter_grid.keys())
     values = [hyperparameter_grid[key] for key in keys]
@@ -437,8 +448,9 @@ def grid_search(hyperparameter_grid, train_loader, val_loader, device='cpu', dat
             hidden_size=config["hidden_size"],
             num_layers=config["num_layers"],
             predict_steps=config.get("predict_steps", 24),
-            predict_start=config.get("predict_start", 168)
-        ).to(device)
+            predict_start=config.get("predict_start", 168),
+            device=device  # Pass device explicitly
+        )
 
         optimizer = optim.Adam(model.parameters(), lr=config["learning_rate"])
 
@@ -481,11 +493,16 @@ def grid_search(hyperparameter_grid, train_loader, val_loader, device='cpu', dat
         hidden_size=best_config["hidden_size"],
         num_layers=best_config["num_layers"],
         predict_steps=best_config.get("predict_steps", 24),
-        predict_start=best_config.get("predict_start", 168)
-    ).to(device)
+        predict_start=best_config.get("predict_start", 168),
+        device=device  # Pass device explicitly
+    )
 
     best_optimizer = optim.Adam(
         best_model.parameters(), lr=best_config["learning_rate"])
+
+    # Ensure data_norm is on the correct device before creating the trainer
+    if data_norm is not None:
+        data_norm.set_device(device)
 
     best_trainer = DeepARTrainer(
         model=best_model,

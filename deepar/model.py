@@ -91,7 +91,8 @@ class DeepAR(nn.Module):
                  num_layers: int = 3,
                  dropout: float = 0.0,
                  predict_steps: int = 24,
-                 predict_start: int = 168):
+                 predict_start: int = 168,
+                 device: str = 'cuda'):
         """
         Args:
           num_class: Number of distinct time series identifiers.
@@ -100,6 +101,9 @@ class DeepAR(nn.Module):
           hidden_size: Number of hidden units in the LSTM.
           num_layers: Number of LSTM layers.
           dropout: Dropout probability applied via variational dropout.
+          predict_steps: Number of steps to forecast.
+          predict_start: Index where forecasting starts.
+          device: Device to run the model on ('cpu' or 'cuda').
         """
         super(DeepAR, self).__init__()
         self.num_class = num_class
@@ -109,9 +113,11 @@ class DeepAR(nn.Module):
         self.num_layers = num_layers
         self.predict_steps = predict_steps
         self.predict_start = predict_start
+        self.device = device
+
         # input len: previous target (1) + covariates + embedding.
         self.input_size = 1 + covariate_size + embedding_dim
-        self.embedding = nn.Embedding(num_class, embedding_dim)
+        self.embedding = nn.Embedding(num_class, embedding_dim).to(self.device)
 
         # self.lstm = LSTM(self.input_size, hidden_size,
         self.lstm = nn.LSTM(input_size=self.input_size,
@@ -119,7 +125,7 @@ class DeepAR(nn.Module):
                             hidden_size=self.hidden_size,
                             bias=True,
                             batch_first=False,
-                            dropout=dropout)
+                            dropout=dropout).to(self.device)
 
         # init LSTM forget gate bias to 1.0
         for name, param in self.lstm.named_parameters():
@@ -128,16 +134,19 @@ class DeepAR(nn.Module):
                 start, end = n // 4, n // 2
                 param.data[start:end].fill_(1.)
 
-        self.relu = nn.ReLU()
+        self.relu = nn.ReLU().to(self.device)
         self.distribution_mu = nn.Linear(
             in_features=self.hidden_size * self.num_layers,
-            out_features=1)
+            out_features=1).to(self.device)
 
         self.distribution_presigma = nn.Linear(
             in_features=self.hidden_size * self.num_layers,
-            out_features=1)
+            out_features=1).to(self.device)
 
-        self.distribution_sigma = nn.Softplus()
+        self.distribution_sigma = nn.Softplus().to(self.device)
+
+        # Move entire model to device
+        self.to(self.device)
 
     def forward(self, target, covariates, idx, h, c):
         """
@@ -145,13 +154,23 @@ class DeepAR(nn.Module):
           target: Tensor of shape (1, batch) containing target values.
           covariates: Tensor of shape (1, batch, covariate_size) containing covariate features.
           idx: Tensor of shape (1, batch); a single integer denoting which time series the input corresponds to.
+          h: Hidden state tensor.
+          c: Cell state tensor.
 
         Returns:
-          loss: Scalar tensor, the average negative log likelihood computed over observed steps.
-          predictions: A list of tuples (mean, sigma) for each time step.
+          mu: Mean forecasts.
+          sigma: Standard deviation forecasts.
+          h: Updated hidden state.
+          c: Updated cell state.
         """
+        # Move inputs to the model's device
+        target = target.to(self.device)
+        covariates = covariates.to(self.device)
+        idx = idx.to(self.device)
+        h = h.to(self.device)
+        c = c.to(self.device)
+
         batch_size, seq_len = target.size()
-        device = target.device
 
         embed = self.embedding(idx)  # shape: (1, batch, embedding_dim)
         # shape: (1, batch, covariate_size + 1)
@@ -159,11 +178,6 @@ class DeepAR(nn.Module):
         # shape: (1, batch, input_size)
         lstm_in = torch.cat([x_cat, embed], dim=-1)
         out, (h, c) = self.lstm(lstm_in, (h, c))
-
-        # out = out.squeeze(0)  # shape: (batch, hidden_size)
-        # mu = self.distribution_mu(out)  # shape: (batch, 1)
-        # presigma = self.distribution_presigma(out)  # shape: (batch, 1)
-        # sigma = self.distribution_sigma(presigma)  # shape: (batch, 1)
 
         h_perm = h.permute(1, 2, 0).contiguous().view(h.shape[1], -1)
         presigma = self.distribution_presigma(h_perm)
@@ -177,14 +191,14 @@ class DeepAR(nn.Module):
             self.num_layers,
             batch_size,
             self.hidden_size,
-            device=self.embedding.weight.device)
+            device=self.device)
 
     def init_cell(self, batch_size):
         return torch.zeros(
             self.num_layers,
             batch_size,
             self.hidden_size,
-            device=self.embedding.weight.device)
+            device=self.device)
 
     def forecast(
             self,
@@ -215,9 +229,10 @@ class DeepAR(nn.Module):
         if test_loader is not None:
             # Get the first batch from test loader
             batch = next(iter(test_loader))
-            label = batch[0]  # target values
-            covariates = batch[1]  # covariates
-            mask = batch[2]  # mask showing where prediction starts
+            label = batch[0].to(self.device)  # target values
+            covariates = batch[1].to(self.device)  # covariates
+            # mask showing where prediction starts
+            mask = batch[2].to(self.device)
 
             # Determine forecast start index from mask
             # Mask indicates observed values
@@ -225,24 +240,32 @@ class DeepAR(nn.Module):
             forecast_start = mask[0].sum().item()
         else:
             # If no test_loader is provided, use the provided tensors
+            if label is not None:
+                label = label.to(self.device)
+            if covariates is not None:
+                covariates = covariates.to(self.device)
+
             forecast_start = self.predict_start
             if mask is None:
                 # Assume prediction starts at predict_start if not specified
-                mask = torch.ones_like(label)
+                mask = torch.ones_like(label, device=self.device)
                 mask[:, self.predict_start:] = 0
+            else:
+                mask = mask.to(self.device)
 
         batch_size = label.size(0)
         transformed_label = label
         transformed_covariates = covariates
-        print("cov shape test", transformed_covariates.shape)
+
         # Create default time series indices if not provided
         if idx is None:
-            idx = torch.zeros(batch_size, dtype=torch.long,
-                              device=label.device)
+            idx = torch.zeros(batch_size, dtype=torch.long, device=self.device)
+        else:
+            idx = idx.to(self.device)
 
         # Apply data normalization if provided
         if data_norm is not None:
-            data_norm.set_device(label.device)
+            data_norm.set_device(self.device)
             transform_in = torch.cat(
                 [label.unsqueeze(-1), covariates], dim=-1)
             transformed = data_norm.transform(transform_in)
@@ -250,7 +273,6 @@ class DeepAR(nn.Module):
             transformed_label = transformed[:, :, 0]
             transformed_covariates = transformed[:, :, 1:]
 
-        device = transformed_label.device
         predict_steps = transformed_label.size(1) - forecast_start
 
         with torch.no_grad():
@@ -274,7 +296,7 @@ class DeepAR(nn.Module):
 
             # Generate samples from the predictive distribution
             samples = torch.zeros(num_samples, batch_size,
-                                  predict_steps, 1, device=device)
+                                  predict_steps, 1, device=self.device)
             for j in range(num_samples):
                 sample_h = h.clone()
                 sample_c = c.clone()
@@ -296,9 +318,6 @@ class DeepAR(nn.Module):
                     )
 
                     # Sample from the predicted distribution
-                    # noise = torch.randn_like(mu)
-                    # sample = mu + sigma * noise
-
                     sample = torch.distributions.Normal(
                         loc=mu, scale=sigma).sample()
 
@@ -313,18 +332,9 @@ class DeepAR(nn.Module):
 
             # Reverse the normalization if applicable
             if data_norm is not None:
-                print('data norm shapes', data_norm.mean.shape,
-                      data_norm.std.shape)
-                print('data norm items', data_norm.mean, data_norm.std)
-                data_norm.set_device(device)
-                # samples = data_norm.reverse(samples)
+                data_norm.set_device(self.device)
                 samples = samples[..., 0:1] * \
                     data_norm.std[..., 0:1] + data_norm.mean[..., 0:1]
-                # sample_means = data_norm.reverse(
-                #     sample_means.unsqueeze(-1))
-
-                # sample_sigmas = data_norm.inverse_transform(
-                #     sample_sigmas, dim=1, is_std=True)
 
         return samples, sample_means, sample_sigmas
 
