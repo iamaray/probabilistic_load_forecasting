@@ -11,7 +11,7 @@
   "x_y_gap": 1,
   "x_window": 168,
   "y_window": 24,
-  "step_size": 1,
+  "step_size": 24,
   "batch_size": 64,
   "num_workers": 1,
   "included_feats": [

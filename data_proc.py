@@ -663,7 +663,7 @@ if __name__ == "__main__":
     #     spatial=False, ar_model=True, csv_path=args.csv_path)
     parser = argparse.ArgumentParser(
         description='Data preprocessing for power consumption dataset')
-    parser.add_argument('--config_path', type=str, default='cfgs/data_proc/spain_dataset_non_spatial.json',
+    parser.add_argument('--config_path', type=str, default='cfgs/data_proc/spain_data/spain_dataset_non_spatial_ar.json',
                         help='Path to the config file containing preprocessing parameters')
     args = parser.parse_args()
 
