@@ -10,96 +10,127 @@ from deepar.trainer import DeepARTrainer, grid_search
 from data_proc import StandardScaleNorm, MinMaxNorm, TransformSequence
 
 
-def main(spatial='spatial'):
+def main(spatial='spatial', dataset="spain_data"):
     spatial = True if spatial == 'spatial' else False
     # Set device.
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    device = torch.device(device)
+    print(f"Using device: {device}")
 
     suffix = "spatial_AR" if spatial else "non_spatial_AR"
 
+    # Load the data transformations
     transforms = torch.load(os.path.join(
-        "data", suffix, f"transforms_{suffix}.pt"))
-    print(type(transforms))
+        f"data/{dataset}_{suffix}", f"transforms_{suffix}.pt"))
+    print(f"Loaded data transforms: {type(transforms)}")
+
+    # Explicitly set the device for transforms
+    transforms.set_device(device)
+    print(f"Set transforms to device: {device}")
+
     # Load the saved data loaders.
     train_loader = torch.load(os.path.join(
-        "data", suffix, f"train_loader_{suffix}.pt"))
+        f"data/{dataset}_{suffix}", f"train_loader_{suffix}.pt"))
     val_loader = torch.load(os.path.join(
-        "data", suffix, f"val_loader_{suffix}.pt"))
-
-    for i, (x, y, z) in enumerate(train_loader):
-        print(x.shape, y.shape, z.shape)
-
+        f"data/{dataset}_{suffix}", f"val_loader_{suffix}.pt"))
     test_loader = torch.load(os.path.join(
-        "data", suffix, f"test_loader_{suffix}.pt"))
+        f"data/{dataset}_{suffix}", f"test_loader_{suffix}.pt"))
 
-    sample = next(iter(train_loader))
-    # sample[1] is the covariate tensor with shape: [batch_size, T, covariate_dim]
-    covariate_dim = sample[1].shape[-1]
+    # Print shapes to debug
+    sample_batch = next(iter(train_loader))
+    print(
+        f"Train sample shapes: target={sample_batch[0].shape}, covariates={sample_batch[1].shape}, mask={sample_batch[2].shape}")
 
-    # hyperparameter_grid = {
-    #     "covariate_size": [covariate_dim],
-    #     "hidden_size": [20, 40, 60],
-    #     "num_layers": [1, 2, 3],
-    #     "embedding_dim": [32, 64],
-    #     "learning_rate": [1e-3]
-    # }
+    # Get covariate dimension from the data
+    covariate_dim = sample_batch[1].shape[-1]
+    print(f"Covariate dimension: {covariate_dim}")
 
+    # Setup grid search parameters - using simplified version for debugging
     hyperparameter_grid = {
+        "num_class": [100],  # Number of distinct time series identifiers
         "covariate_size": [covariate_dim],
-        "hidden_size": [20],
-        "num_layers": [1],
+        "hidden_size": [40],
+        "num_layers": [3],
         "embedding_dim": [32],
-        "learning_rate": [1e-3]
+        "learning_rate": [1e-3],
+        "predict_steps": [24],  # Number of steps to forecast
+        "predict_start": [336]  # Index where forecasting starts
     }
 
+    print(f"Starting grid search with hyperparameters: {hyperparameter_grid}")
+
+    # Run grid search to find best model
     best_model, best_config, best_loss, results = grid_search(
         hyperparameter_grid,
         train_loader,
         val_loader,
-        device=device,
+        device=device,  # Pass device explicitly
         data_norm=transforms,
-        num_epochs=10,
-        savename="best_deepar_model"
+        num_epochs=1,
+        savename=f"best_deepar_model_{suffix}"
     )
 
+    print(f"Grid search completed. Best validation loss: {best_loss:.4f}")
+    print(f"Best configuration: {best_config}")
+
+    # Generate forecasts with the best model
+    print("Generating forecasts...")
     samples, means, sigmas = best_model.forecast(
-        test_loader=test_loader, num_samples=40, data_norm=transforms)
+        test_loader=test_loader,
+        num_samples=40,
+        data_norm=transforms
+    )
+    samples = samples.squeeze(-1)
+    print('samples shape', samples.shape)
 
+    # Get the first batch from test loader for visualization
     first_batch = next(iter(test_loader))
-
     context_target, _, mask = first_batch
 
+    # Determine where the forecast starts
     forecast_start = mask[0].sum().item()
-    true_values = context_target[0, forecast_start:].cpu().numpy()
 
-    forecast_samples = samples[:, 0, :].cpu().numpy()
-    forecast_mean = means[0, :].cpu().numpy()
-    forecast_sigma = sigmas[0, :].cpu().numpy()
+    # Choose a sample to visualize - keeping the same sample_index as before
+    plot_sample = 63
 
-    # Create the plot
-    plt.figure(figsize=(12, 6))
+    # Extract true values for the entire period and forecasts
+    true_values_all = context_target[plot_sample, :].cpu().numpy()
+    true_values_forecast = context_target[plot_sample, forecast_start:].cpu(
+    ).numpy()
+    forecast_samples = samples[:, plot_sample, :].cpu().numpy()
+    forecast_mean = means[plot_sample, :].squeeze(-1).cpu().numpy()
+    forecast_sigma = sigmas[plot_sample, :].squeeze(-1).cpu().numpy()
 
-    # Plot the true values
-    plt.plot(true_values, 'k-', linewidth=2, label='True Values')
+    # Create the visualization plot
+    plt.figure(figsize=(15, 6))
 
-    # Plot a subset of samples for clarity (e.g., 10 samples)
-    num_samples_to_plot = forecast_samples.shape[0]
+    # Plot entire true values sequence
+    plt.plot(range(len(true_values_all)), true_values_all,
+             'k-', linewidth=2, label='True Values')
+
+    # Add vertical line to mark forecast start
+    plt.axvline(x=forecast_start, color='gray',
+                linestyle='--', label='Forecast Start')
+
+    # Plot samples for visual representation of uncertainty
+    # Limit samples for clarity
+    num_samples_to_plot = min(20, forecast_samples.shape[0])
     for i in range(num_samples_to_plot):
-        plt.plot(forecast_samples[i], 'b-', alpha=0.3)
+        plt.plot(range(forecast_start, forecast_start + len(forecast_mean)),
+                 forecast_samples[i, :], 'b-', alpha=0.3)
 
-    # Plot the mean forecast
-    plt.plot(forecast_mean, 'r-', linewidth=2, label='Mean Forecast')
+    # Plot mean forecast
+    plt.plot(range(forecast_start, forecast_start + len(forecast_mean)),
+             forecast_mean, 'r-', linewidth=2, label='Mean Forecast')
 
-    # Plot confidence intervals (mean ± 2*sigma)
+    # Plot confidence intervals (mean ± 2*sigma for approximate 95% CI)
     plt.fill_between(
-        np.arange(len(forecast_mean)),
+        range(forecast_start, forecast_start + len(forecast_mean)),
         forecast_mean - 2 * forecast_sigma,
         forecast_mean + 2 * forecast_sigma,
         color='r', alpha=0.2, label='95% Confidence Interval'
     )
 
-    plt.title('DeepAR Forecast vs True Values')
+    plt.title(f'DeepAR Forecast vs True Values ({suffix})')
     plt.xlabel('Time Steps')
     plt.ylabel('Value')
     plt.legend()
@@ -111,7 +142,8 @@ def main(spatial='spatial'):
 
     print(f"Forecast plot saved as deepar_forecast_{suffix}.png")
 
-    print("Grid search results:")
+    # Print summary of grid search results
+    print("\nGrid search results summary:")
     for config, loss in results:
         print(f"Config: {config}, Val Loss: {loss:.4f}")
     print(f"Best Config: {best_config} with loss {best_loss:.4f}")
