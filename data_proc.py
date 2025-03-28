@@ -112,12 +112,18 @@ class StandardScaleNorm(DataTransform):
             ) / self.std[..., transform_col:transform_col+1]
         return x_transformed
 
-    def reverse(self, transformed: torch.Tensor, reverse_col=0):
+    def reverse(self, transformed: torch.Tensor, reverse_col=0, is_std=False):
         x_reversed = transformed.clone()
-        x_reversed[..., reverse_col:reverse_col+1] = (
-            transformed[..., reverse_col:reverse_col+1] *
-            self.std[..., reverse_col:reverse_col+1]
-        ) + self.mean[..., reverse_col:reverse_col+1]
+        if is_std:
+            x_reversed[..., reverse_col:reverse_col+1] = (
+                transformed[..., reverse_col:reverse_col+1] *
+                self.std[..., reverse_col:reverse_col+1]
+            )
+        else:
+            x_reversed[..., reverse_col:reverse_col+1] = (
+                transformed[..., reverse_col:reverse_col+1] *
+                self.std[..., reverse_col:reverse_col+1]
+            ) + self.mean[..., reverse_col:reverse_col+1]
         return x_reversed
 
     def set_device(self, device='cuda'):
@@ -343,10 +349,14 @@ def benchmark_preprocess(
 
     print(f"Saving data to directory: {output_dir}")
     os.makedirs(output_dir, exist_ok=True)
+    torch.save(train_tensor, os.path.join(
+        output_dir, f"train_tensor_{suffix}.pt"))
 
-    train_tensor_path = os.path.join(output_dir, f"train_tensor_{suffix}.pt")
-    print(f"Saving train tensor to: {train_tensor_path}")
-    torch.save(train_tensor, train_tensor_path)
+    # Save train_tensor to its own file
+    output_dir = f"data/{suffix}"
+    os.makedirs(output_dir, exist_ok=True)
+    torch.save(train_tensor, os.path.join(
+        output_dir, f"train_tensor_{suffix}.pt"))
 
     if ar_model:
         suffix = f"{suffix}_AR"
