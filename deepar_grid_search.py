@@ -53,7 +53,7 @@ def main(spatial='spatial', dataset="spain_data"):
         "embedding_dim": [32],
         "learning_rate": [1e-3],
         "predict_steps": [24],  # Number of steps to forecast
-        "predict_start": [168]  # Index where forecasting starts
+        "predict_start": [336]  # Index where forecasting starts
     }
 
     print(f"Starting grid search with hyperparameters: {hyperparameter_grid}")
