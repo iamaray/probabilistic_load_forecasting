@@ -59,8 +59,24 @@ The script produces the following output files in the specified output directory
 - `val_loader_{suffix}.pt`: Validation DataLoader
 - `test_loader_{suffix}.pt`: Test DataLoader
 - `transforms_{suffix}.pt`: Data normalization transforms
+- `data_report_{suffix}.txt`: Detailed report of data processing
 
 Where `{suffix}` is either `spatial` or `non_spatial`, possibly with `_AR` appended for autoregressive models.
+
+## Data Report
+
+A comprehensive data report is automatically generated in the output directory. This report includes:
+
+- Dataset information (source file, date ranges)
+- Data dimensions and sample counts
+- Sliding window parameters
+- Feature information
+- Model type settings
+- Normalization details (including mean/std or min/max values)
+- Output file information
+- Timestamp of processing
+
+This report is useful for reproducibility and documenting the exact preprocessing steps and data characteristics.
 
 ## Example: Creating a New Configuration
 

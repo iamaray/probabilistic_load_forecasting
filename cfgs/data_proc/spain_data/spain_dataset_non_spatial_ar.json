@@ -6,12 +6,12 @@
   "val_end": "2018-07-01",
   "test_start": "2018-07-01",
   "test_end": "2018-12-31",
-  "ar_model": false,
+  "ar_model": true,
   "x_start_hour": 1,
   "x_y_gap": 1,
-  "x_window": 168,
+  "x_window": 336,
   "y_window": 24,
-  "step_size": 1,
+  "step_size": 24,
   "batch_size": 64,
   "num_workers": 1,
   "included_feats": [
@@ -23,6 +23,6 @@
   ],
   "num_transform_cols": 2,
   "spatial": false,
-  "output_dir": "data/spain_data",
+  "output_dir": "data/spain_data_non_spatial_AR",
   "date_column": "time"
 }
