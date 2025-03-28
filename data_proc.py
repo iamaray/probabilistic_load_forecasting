@@ -654,23 +654,6 @@ def generate_data_report(
 
 
 if __name__ == "__main__":
-    # parser = argparse.ArgumentParser(
-    #     description='Data preprocessing for power consumption dataset')
-    # parser.add_argument('--csv_path', type=str, default='data/ercot_data_cleaned.csv',
-    #                     help='Path to the CSV file containing power consumption data')
-    # args = parser.parse_args()
-
-    # # For non-AR models
-    # spatial_transforms = benchmark_preprocess(
-    #     spatial=True, ar_model=False, train_transforms=None, csv_path=args.csv_path)
-    # non_spatial_transforms = benchmark_preprocess(
-    #     spatial=False, ar_model=False, train_transforms=None, csv_path=args.csv_path)
-
-    # # For AR models
-    # spatial_transforms = benchmark_preprocess(
-    #     spatial=True, ar_model=True, csv_path=args.csv_path)
-    # non_spatial_transforms = benchmark_preprocess(
-    #     spatial=False, ar_model=True, csv_path=args.csv_path)
     parser = argparse.ArgumentParser(
         description='Data preprocessing for power consumption dataset')
     parser.add_argument('--config_path', type=str, default='cfgs/data_proc/spain_data/spain_dataset_non_spatial_ar.json',
@@ -680,7 +663,6 @@ if __name__ == "__main__":
     with open(args.config_path, 'r') as f:
         config = json.load(f)
 
-    # Convert date strings to datetime objects if provided
     def parse_date(date_value, default_date):
         if not date_value:
             return default_date
@@ -695,11 +677,9 @@ if __name__ == "__main__":
     test_start = parse_date(config.get("test_start"), datetime(2024, 9, 1))
     test_end = parse_date(config.get("test_end"), datetime(2025, 1, 6))
 
-    # Setup transform based on device
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     train_transforms = [StandardScaleNorm(device=device)]
 
-    # Call benchmark_preprocess with parameters from config
     transforms = benchmark_preprocess(
         csv_path=config.get("csv_path", "data/ercot_data_cleaned.csv"),
         train_start_end=(train_start, train_end),
