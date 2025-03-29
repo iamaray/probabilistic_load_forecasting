@@ -23,6 +23,6 @@
   ],
   "num_transform_cols": 2,
   "spatial": false,
-  "output_dir": "data/spain_data_non_spatial_AR",
+  "output_dir": "data/spain_data_24_non_spatial_AR",
   "date_column": "time"
 }

@@ -353,7 +353,7 @@ def benchmark_preprocess(
         output_dir, f"train_tensor_{suffix}.pt"))
 
     # Save train_tensor to its own file
-    output_dir = f"data/{suffix}"
+    # output_dir = f"data/{suffix}"
     os.makedirs(output_dir, exist_ok=True)
     torch.save(train_tensor, os.path.join(
         output_dir, f"train_tensor_{suffix}.pt"))
@@ -605,7 +605,6 @@ def generate_data_report(
             if transform_type == "StandardScaleNorm":
                 if hasattr(transform, 'mean') and hasattr(transform, 'std'):
                     f.write("\nMEAN AND STD VALUES\n")
-                    # Show at most 5 columns
                     for i in range(min(5, config.get('num_transform_cols', 3))):
                         f.write(
                             f"Feature {i}: Mean={transform.mean[0, 0, i].item():.4f}, Std={transform.std[0, 0, i].item():.4f}\n")
@@ -614,7 +613,6 @@ def generate_data_report(
             elif transform_type == "MinMaxNorm":
                 if hasattr(transform, 'min_val') and hasattr(transform, 'max_val'):
                     f.write("\nMIN AND MAX VALUES\n")
-                    # Show at most 5 columns
                     for i in range(min(5, config.get('num_transform_cols', 3))):
                         f.write(
                             f"Feature {i}: Min={transform.min_val[0, 0, i].item():.4f}, Max={transform.max_val[0, 0, i].item():.4f}\n")

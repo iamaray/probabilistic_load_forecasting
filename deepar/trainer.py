@@ -399,7 +399,7 @@ class DeepARTrainer:
         print(f"Model saved to {model_path}")
 
 
-def grid_search(hyperparameter_grid, train_loader, val_loader, device='cuda', data_norm=None, num_epochs=10, savename='deepar_best_model_spatial'):
+def grid_search(hyperparameter_grid, train_loader, val_loader, device='cuda', data_norm=None, num_epochs=10, savename='deepar_best_model_spatial', extra_epochs=50):
     """
     Performs a grid search over the hyperparameter grid for the DeepAR model.
 
@@ -483,7 +483,6 @@ def grid_search(hyperparameter_grid, train_loader, val_loader, device='cuda', da
         f"\nBest configuration: {best_config} with validation loss: {best_loss:.4f}")
 
     # Train best model for additional epochs
-    extra_epochs = 50
     print(f"\nTraining best model for {extra_epochs} additional epochs...")
 
     best_model = DeepAR(

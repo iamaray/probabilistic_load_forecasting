@@ -10,7 +10,7 @@ from deepar.trainer import DeepARTrainer, grid_search
 from data_proc import StandardScaleNorm, MinMaxNorm, TransformSequence
 
 
-def main(spatial='spatial', dataset="spain_data"):
+def main(spatial='spatial', dataset="spain_data", savename="_1", grid_search_epochs=1, extra_epochs=50):
     spatial = True if spatial == 'spatial' else False
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -58,8 +58,9 @@ def main(spatial='spatial', dataset="spain_data"):
         val_loader,
         device=device,
         data_norm=transforms,
-        num_epochs=1,
-        savename=f"best_deepar_model_{suffix}"
+        num_epochs=grid_search_epochs,
+        extra_epochs=extra_epochs,
+        savename=f"best_deepar_model_{suffix}{savename}"
     )
 
     print(f"Grid search completed. Best validation loss: {best_loss:.4f}")
@@ -135,5 +136,12 @@ if __name__ == "__main__":
                         help='Use spatial features ("spatial") or non-spatial features ("non_spatial")')
     parser.add_argument('--dataset', type=str, default='spain_data',
                         help='Use spain_data or ercot_data')
+    parser.add_argument('--savename', type=str, default='',
+                        help='suffix for savename of best model -- differentiates between different runs')
+    parser.add_argument('--grid_search_epochs', type=int, default=1,
+                        help='number of epochs for grid search')
+    parser.add_argument('--extra_epochs', type=int, default=50,
+                        help='number of extra epochs for training')
     args = parser.parse_args()
-    main(spatial=args.spatial, dataset=args.dataset)
+    main(spatial=args.spatial, dataset=args.dataset, savename=args.savename,
+         grid_search_epochs=args.grid_search_epochs, extra_epochs=args.extra_epochs)
