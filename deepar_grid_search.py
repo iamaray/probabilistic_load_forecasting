@@ -4,13 +4,14 @@ import itertools
 import argparse
 import matplotlib.pyplot as plt
 import numpy as np
+import json
 
 from deepar.model import DeepAR
 from deepar.trainer import DeepARTrainer, grid_search
 from data_proc import StandardScaleNorm, MinMaxNorm, TransformSequence
 
 
-def main(spatial='spatial', dataset="spain_data", savename="_1", grid_search_epochs=1, extra_epochs=50):
+def main(spatial='spatial', dataset="spain_data", savename="_1", grid_search_epochs=1, extra_epochs=50, config_file=None):
     spatial = True if spatial == 'spatial' else False
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -39,16 +40,27 @@ def main(spatial='spatial', dataset="spain_data", savename="_1", grid_search_epo
     covariate_dim = sample_batch[1].shape[-1]
     print(f"Covariate dimension: {covariate_dim}")
 
-    hyperparameter_grid = {
-        "num_class": [100],  # Number of distinct time series identifiers
-        "covariate_size": [covariate_dim],
-        "hidden_size": [40],
-        "num_layers": [3],
-        "embedding_dim": [32],
-        "learning_rate": [1e-3],
-        "predict_steps": [24],  # Number of steps to forecast
-        "predict_start": [336]  # Index where forecasting starts
-    }
+    # Load hyperparameter grid from config file
+    if config_file:
+        with open(config_file, 'r') as f:
+            hyperparameter_grid = json.load(f)
+        print(f"Loaded hyperparameter grid from {config_file}")
+    else:
+        # Default hyperparameter grid if no config file is provided
+        hyperparameter_grid = {
+            "num_class": [100],  # Number of distinct time series identifiers
+            "covariate_size": [covariate_dim],
+            "hidden_size": [40],
+            "num_layers": [3],
+            "embedding_dim": [32],
+            "learning_rate": [1e-3],
+            "predict_steps": [24],  # Number of steps to forecast
+            "predict_start": [336]  # Index where forecasting starts
+        }
+        print("Using default hyperparameter grid")
+
+    # Ensure covariate_size is set correctly based on the data
+    hyperparameter_grid["covariate_size"] = [covariate_dim]
 
     print(f"Starting grid search with hyperparameters: {hyperparameter_grid}")
 
@@ -142,6 +154,9 @@ if __name__ == "__main__":
                         help='number of epochs for grid search')
     parser.add_argument('--extra_epochs', type=int, default=50,
                         help='number of extra epochs for training')
+    parser.add_argument('--config_file', type=str, default=None,
+                        help='path to JSON file containing hyperparameter grid configuration')
     args = parser.parse_args()
     main(spatial=args.spatial, dataset=args.dataset, savename=args.savename,
-         grid_search_epochs=args.grid_search_epochs, extra_epochs=args.extra_epochs)
+         grid_search_epochs=args.grid_search_epochs, extra_epochs=args.extra_epochs,
+         config_file=args.config_file)

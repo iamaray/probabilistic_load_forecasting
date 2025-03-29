@@ -1,7 +1,6 @@
 import numpy as np
 import torch
 
-
 def compute_metrics(forecasts, ground_truth, train_scaler=None, alpha=0.2):
     """
     Compute metrics for probabilistic forecasts:
