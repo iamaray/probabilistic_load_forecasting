@@ -1,0 +1,10 @@
+{
+  "num_class": [50, 100],
+  "hidden_size": [40, 60, 80],
+  "num_layers": [2, 3, 4],
+  "embedding_dim": [20, 32, 48],
+  "learning_rate": [1e-3, 5e-4, 1e-4],
+  "predict_steps": [24],
+  "predict_start": [336],
+  "dropout_rate": [0.1, 0.2, 0.3]
+}

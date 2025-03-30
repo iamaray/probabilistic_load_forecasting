@@ -479,6 +479,10 @@ def grid_search(hyperparameter_grid, train_loader, val_loader, device='cuda', da
             best_loss = val_loss
             best_config = config
 
+        if device == 'cuda':
+            torch.cuda.empty_cache()
+            print("Cleared GPU cache")
+
     print(
         f"\nBest configuration: {best_config} with validation loss: {best_loss:.4f}")
 

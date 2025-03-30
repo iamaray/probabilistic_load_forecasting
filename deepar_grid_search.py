@@ -92,7 +92,9 @@ def main(spatial='spatial', dataset="spain_data", savename="_1", grid_search_epo
 
     forecast_start = mask[0].sum().item()
 
-    plot_batches = [1, 32, 63]
+    plot_batches = [1, 15, 32, 63]
+    plot_savedir = 'results/deepar/visualizations'
+    os.makedirs(plot_savedir, exist_ok=True)
 
     for plot_batch in plot_batches:
         true_values_all = context_target[plot_batch, :].cpu().numpy()
@@ -110,20 +112,10 @@ def main(spatial='spatial', dataset="spain_data", savename="_1", grid_search_epo
         plt.axvline(x=forecast_start, color='gray',
                     linestyle='--', label='Forecast Start')
 
-        num_samples_to_plot = min(20, forecast_samples.shape[0])
+        num_samples_to_plot = forecast_samples.shape[0]
         for i in range(num_samples_to_plot):
             plt.plot(range(forecast_start, forecast_start + len(forecast_mean)),
                      forecast_samples[i, :], 'b-', alpha=0.3)
-
-        plt.plot(range(forecast_start, forecast_start + len(forecast_mean)),
-                 forecast_mean, 'r-', linewidth=2, label='Mean Forecast')
-
-        plt.fill_between(
-            range(forecast_start, forecast_start + len(forecast_mean)),
-            forecast_mean - 2 * forecast_sigma,
-            forecast_mean + 2 * forecast_sigma,
-            color='r', alpha=0.2, label='95% Confidence Interval'
-        )
 
         plt.title(f'DeepAR Forecast vs True Values ({suffix})')
         plt.xlabel('Time Steps')
@@ -131,7 +123,8 @@ def main(spatial='spatial', dataset="spain_data", savename="_1", grid_search_epo
         plt.legend()
         plt.grid(True)
 
-        plt.savefig(f'deepar_forecast_{suffix}_{plot_batch}.png')
+        plt.savefig(
+            f'{plot_savedir}/deepar_forecast{savename}_{suffix}_{plot_batch}.png')
         plt.close()
 
     print(f"Forecast plot saved as deepar_forecast_{suffix}.png")

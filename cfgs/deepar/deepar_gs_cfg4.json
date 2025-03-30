@@ -1,0 +1,9 @@
+{
+  "num_class": [100],
+  "hidden_size": [32, 64, 128, 256],
+  "num_layers": [3],
+  "predict_steps": [24],
+  "embedding_dim": [32],
+  "predict_start": [336],
+  "dropout_rate": [0.1]
+}
