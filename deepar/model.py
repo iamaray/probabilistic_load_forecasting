@@ -5,8 +5,6 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import PackedSequence
 from typing import Optional
 
-# Variational Dropout remains unchanged.
-
 
 class VariationalDropout(nn.Module):
     def __init__(self, dropout: float, batch_first: Optional[bool] = False):

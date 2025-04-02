@@ -156,7 +156,6 @@ class TransformSequence(DataTransform):
         x = transformed.clone()
         for t in reversed(self.transforms):
             x = t.reverse(x, reverse_col)
-            x = t.reverse(x, reverse_col)
         return x
 
     def set_device(self, device):

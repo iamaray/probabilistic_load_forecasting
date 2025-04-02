@@ -14,7 +14,6 @@ from .distributions import PriorWeightDistributionTemplate
 
 
 def clones(module, N):
-    # Using nn.ModuleList ensures parameters are registered.
     return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
 
 
@@ -201,7 +200,7 @@ class BayesianMDeT(nn.Module):
         num_feats = num_targets + num_aux_feats
 
         self.prior_dist = prior_dist
-        print('HERE:', type(prior_dist))
+        # print('HERE:', type(prior_dist))
 
         self.encoderLinear = BayesianLinear(num_feats, d_model)
         self.encoder = self._build_encoder(encoder_layers, d_model, encoder_dropout,
